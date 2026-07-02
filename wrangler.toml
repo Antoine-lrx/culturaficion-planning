@@ -1,0 +1,12 @@
+name = "culturaficion-planning"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Ce fichier ne définit volontairement pas de liaison D1 : pour un projet
+# Cloudflare Pages connecté à GitHub, la liaison vers la base D1
+# "culturaficion_planning" (nom de binding recommandé : DB) et la variable
+# ACCESS_CODE se règlent dans le tableau de bord Cloudflare
+# (Réglages -> Fonctions / Variables). Voir le README pour la marche à suivre.
+#
+# Pour tester en local avant de pousser, voir la section "Développement
+# local" du README (commande `npm run pages:dev`).

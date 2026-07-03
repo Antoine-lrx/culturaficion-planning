@@ -74,18 +74,27 @@ redéploiera automatiquement** le site.
 
 ### Étape 4 — Lier la base D1 au projet Pages
 
-1. Ouvrez votre projet Pages fraîchement créé (**Workers & Pages** → nom du
-   projet).
-2. Allez dans l'onglet **Settings** (Réglages) → **Functions** (Fonctions).
-3. Descendez jusqu'à **D1 database bindings** (Liaisons de base de données
-   D1) et cliquez sur **Add binding** (Ajouter une liaison).
-4. Renseignez :
-   - **Variable name** (nom de la variable) : `DB` — important, le code du
-     projet attend exactement ce nom.
-   - **D1 database** : sélectionnez `culturaficion_planning`.
-5. Cliquez sur **Save** (Enregistrer).
-6. Faites-le pour les deux environnements proposés s'ils apparaissent
-   séparément (**Production** et **Preview**).
+Dès que Cloudflare détecte un `wrangler.toml` dans le dépôt (c'est le cas
+ici), l'onglet **Settings → Liaisons** du tableau de bord passe en lecture
+seule avec le message *« Les liaisons de ce projet sont gérées via
+wrangler.toml »* — la liaison D1 se définit donc directement dans ce fichier,
+pas dans le tableau de bord.
+
+1. Récupérez l'identifiant de votre base D1 depuis un terminal (avec
+   `wrangler login` déjà fait, voir étape 6) :
+   ```
+   npx wrangler d1 info culturaficion_planning
+   ```
+   Notez la valeur `database_id` affichée (un UUID).
+2. Dans le fichier `wrangler.toml` du dépôt, ajoutez :
+   ```toml
+   [[d1_databases]]
+   binding = "DB"
+   database_name = "culturaficion_planning"
+   database_id = "VOTRE_DATABASE_ID"
+   ```
+3. Commitez et poussez ce changement — Cloudflare Pages redéploiera
+   automatiquement avec la liaison active.
 
 ### Étape 5 — Définir le code d'accès (`ACCESS_CODE`)
 
@@ -180,9 +189,9 @@ npx wrangler d1 execute culturaficion_planning --local \
 npm run pages:dev    # build + sert l'app avec l'API sur http://localhost:8788
 ```
 
-`wrangler.toml` ne définit volontairement aucune liaison D1 : en production,
-la liaison `DB` et `ACCESS_CODE` viennent du tableau de bord Cloudflare
-Pages (voir étapes 4 et 5 ci-dessus), pas du dépôt.
+La liaison D1 (`DB`) vient de `wrangler.toml` (voir étape 4 ci-dessus) ;
+`ACCESS_CODE` reste un secret défini dans le tableau de bord Cloudflare
+Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
 
 ---
 

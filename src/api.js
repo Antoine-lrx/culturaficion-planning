@@ -7,23 +7,30 @@
 
 const CODE_KEY = "culturaficion:access_code";
 
+// Doublé par une variable en mémoire : si sessionStorage est indisponible ou
+// bloqué (réglages de confidentialité, extension...), le code reste quand
+// même utilisable pour le reste de la page au lieu d'être perdu en silence.
+let memoryCode = "";
+
 export function getStoredCode() {
   try {
-    return sessionStorage.getItem(CODE_KEY) || "";
+    return sessionStorage.getItem(CODE_KEY) || memoryCode;
   } catch {
-    return "";
+    return memoryCode;
   }
 }
 
 export function storeCode(code) {
+  memoryCode = code;
   try {
     sessionStorage.setItem(CODE_KEY, code);
   } catch {
-    /* stockage indisponible (navigation privée…) : le code reste en mémoire JS pour cette page */
+    /* stockage indisponible : le code reste en mémoire JS pour cette page */
   }
 }
 
 export function clearCode() {
+  memoryCode = "";
   try {
     sessionStorage.removeItem(CODE_KEY);
   } catch {}

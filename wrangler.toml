@@ -2,11 +2,15 @@ name = "culturaficion-planning"
 compatibility_date = "2024-11-01"
 pages_build_output_dir = "dist"
 
-# Ce fichier ne définit volontairement pas de liaison D1 : pour un projet
-# Cloudflare Pages connecté à GitHub, la liaison vers la base D1
-# "culturaficion_planning" (nom de binding recommandé : DB) et la variable
-# ACCESS_CODE se règlent dans le tableau de bord Cloudflare
-# (Réglages -> Fonctions / Variables). Voir le README pour la marche à suivre.
-#
-# Pour tester en local avant de pousser, voir la section "Développement
-# local" du README (commande `npm run pages:dev`).
+# Cloudflare Pages gère les liaisons de ce projet exclusivement via ce
+# fichier dès qu'il en détecte un (le tableau de bord affiche alors les
+# liaisons en lecture seule avec le message "Les liaisons de ce projet
+# sont gérées via wrangler.toml"). La liaison D1 doit donc être définie
+# ici plutôt que dans l'écran "Liaisons" du tableau de bord.
+[[d1_databases]]
+binding = "DB"
+database_name = "culturaficion_planning"
+database_id = "59fba873-a9df-4df5-adc7-97d44bf656b0"
+
+# ACCESS_CODE reste un secret défini dans le tableau de bord Cloudflare
+# (Settings -> Variables et secrets) : il ne doit jamais être commité ici.

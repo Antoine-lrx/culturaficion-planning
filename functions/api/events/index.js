@@ -13,16 +13,16 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "JSON invalide" }, { status: 400 });
   }
 
-  const { id, type, title, monthKey, date, status, proposedBy, notes } = body || {};
+  const { id, type, title, monthKey, date, lieu, status, proposedBy, notes } = body || {};
   if (!id || !type || !title || !monthKey || !status) {
     return json({ error: "Champs requis manquants (id, type, title, monthKey, status)." }, { status: 400 });
   }
 
   const createdAt = Date.now();
   await env.DB.prepare(
-    `INSERT INTO events (id, type, title, month_key, date, status, proposed_by, voters, notes, registered, revenue, expenses, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, NULL, NULL, NULL, ?)`
-  ).bind(id, type, title, monthKey, date || null, status, proposedBy || null, notes || null, createdAt).run();
+    `INSERT INTO events (id, type, title, month_key, date, lieu, status, proposed_by, voters, notes, registered, revenue, expenses, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, NULL, NULL, NULL, ?)`
+  ).bind(id, type, title, monthKey, date || null, lieu || null, status, proposedBy || null, notes || null, createdAt).run();
 
   const row = await env.DB.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
   return json(rowToEvent(row), { status: 201 });

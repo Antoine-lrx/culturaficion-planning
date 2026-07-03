@@ -5,6 +5,7 @@ export function rowToEvent(row) {
     title: row.title,
     monthKey: row.month_key,
     date: row.date,
+    lieu: row.lieu,
     status: row.status,
     proposedBy: row.proposed_by,
     voters: safeParseArray(row.voters),

@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Culturafición · Frise de la saison</title>
+    <style>
+      /* Fond de repli affiché avant le chargement du CSS/JS de l'app,
+         pour éviter tout flash blanc au premier affichage. */
+      html, body, #root {
+        min-height: 100dvh;
+        min-height: 100vh;
+      }
+      html, body {
+        margin: 0;
+        background: #EDE3D1;
+        overscroll-behavior-y: none;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

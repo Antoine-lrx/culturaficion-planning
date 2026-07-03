@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   Plus, Heart, Trash2, Pencil, X, RefreshCw,
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
-  Users, Wallet, Scale, Lock, Loader2,
+  Users, Wallet, Scale, Lock, Loader2, Home, Search, MapPin,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 
@@ -61,17 +61,29 @@ function fmtDate(iso) {
     return new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short" }).format(d);
   } catch { return null; }
 }
+const normalize = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, #root{
+  min-height:100dvh;
+  min-height:100vh;
+}
+html, body{
+  margin:0;
+  background:radial-gradient(120% 100% at 50% -20%, #F2EAD9 0%, #EDE3D1 55%, #E4D8C0 100%);
+  overscroll-behavior-y:none;
+}
 
 .cf-root{
   --albero:#EDE3D1; --albero-2:#E4D8C0;
   --sangre:#BB322C; --sangre-deep:#8E211C;
   --oro:#B8862E; --tinta:#1A1413; --blanco:#F8F5EE;
   font-family:'Inter',system-ui,sans-serif; color:var(--tinta);
-  background:radial-gradient(120% 100% at 50% -20%, #F2EAD9 0%, var(--albero) 55%, var(--albero-2) 100%);
-  min-height:100%; padding:18px clamp(12px,3vw,28px) 40px;
+  background:transparent;
+  min-height:100dvh; min-height:100vh;
+  padding:18px clamp(12px,3vw,28px) 40px;
 }
 .cf-root *{box-sizing:border-box}
 .cf-display{font-family:'Bebas Neue',sans-serif;letter-spacing:.02em;font-weight:400}
@@ -87,6 +99,33 @@ const CSS = `
   width:30px;height:30px;border-radius:999px;display:grid;place-items:center;cursor:pointer;transition:.15s}
 .cf-iconbtn:hover{border-color:var(--sangre);color:var(--sangre)}
 .cf-spacer{flex:1 1 40px}
+
+.cf-viewtoggle{display:flex;gap:6px;align-items:center}
+.cf-vt{appearance:none;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:700;letter-spacing:.02em;
+  border-radius:999px;padding:8px 15px;border:1px solid rgba(26,20,19,.18);background:var(--blanco);color:#6b6258;
+  display:inline-flex;align-items:center;gap:6px;transition:.12s}
+.cf-vt[aria-pressed="true"]{background:var(--tinta);color:var(--albero);border-color:var(--tinta)}
+.cf-vt:hover{border-color:var(--sangre)}
+
+.cf-home{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+.cf-search-wrap{position:relative}
+.cf-search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9a8d7c;pointer-events:none}
+.cf-search-input{width:100%;font-family:inherit;font-size:15px;color:var(--tinta);background:var(--blanco);
+  border:1px solid rgba(26,20,19,.18);border-radius:12px;padding:13px 16px 13px 40px;outline:none;transition:.12s}
+.cf-search-input:focus{border-color:var(--sangre);box-shadow:0 0 0 3px rgba(187,50,44,.14)}
+.cf-search-count{font-size:12px;color:#7a6f63}
+.cf-search-list{display:flex;flex-direction:column;gap:9px}
+.cf-search-empty{color:#8a7d6e;font-size:13px;padding:22px;text-align:center;border:1px dashed rgba(26,20,19,.2);border-radius:12px}
+
+.cf-search-card{position:relative;cursor:pointer;background:var(--blanco);border-radius:11px;padding:12px 14px 12px 18px;
+  border:1px solid rgba(26,20,19,.1);box-shadow:0 1px 2px rgba(26,20,19,.06);overflow:hidden;transition:.14s;
+  display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between}
+.cf-search-card:hover{box-shadow:0 6px 16px rgba(26,20,19,.13);transform:translateY(-1px)}
+.cf-search-card .stripe{position:absolute;left:0;top:0;bottom:0;width:5px}
+.cf-search-card-main{flex:1 1 220px;min-width:0}
+.cf-search-card-stats{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px;font-weight:600;color:#7a6f63}
+.cf-search-card-stats .pos{color:#3F7A4E}
+.cf-search-card-stats .neg{color:#BB322C}
 
 .cf-me{display:flex;align-items:center;gap:8px;background:var(--blanco);border:1px solid rgba(26,20,19,.16);
   border-radius:999px;padding:5px 6px 5px 14px}
@@ -232,6 +271,7 @@ const CSS = `
   .cf-month{flex:1 1 auto}
   .cf-me input{width:96px}
   .cf-statusfilter{margin-left:0}
+  .cf-search-card{flex-direction:column;align-items:flex-start}
 }
 @media (prefers-reduced-motion:reduce){.cf-root *{transition:none!important;animation:none!important}}
 .cf-root :focus-visible{outline:2px solid var(--sangre);outline-offset:2px;border-radius:6px}
@@ -250,6 +290,10 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [codeInput, setCodeInput] = useState("");
+
+  // "accueil" (recherche) ou "frise" (planning 12 mois)
+  const [view, setView] = useState("accueil");
+  const [search, setSearch] = useState("");
 
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATS);
@@ -339,7 +383,7 @@ export default function App() {
     if (!me.trim()) return requireName();
     setModal({ mode: "add", draft: {
       id: uid(), type: categories[0]?.id || "autre", title: "",
-      monthKey: monthKey || months[0].key, date: "", status: "idee",
+      monthKey: monthKey || months[0].key, date: "", lieu: "", status: "idee",
       notes: "", proposedBy: me.trim(), voters: [],
     }});
   };
@@ -352,14 +396,14 @@ export default function App() {
       if (modal.mode === "add") {
         const created = await api.createEvent({
           id: d.id, type: d.type, title: d.title.trim(), monthKey: d.monthKey,
-          date: d.date || null, status: d.status, proposedBy: d.proposedBy || null,
+          date: d.date || null, lieu: d.lieu || null, status: d.status, proposedBy: d.proposedBy || null,
           notes: d.notes || null,
         });
         setEvents((list) => [...list, created]);
       } else {
         const updated = await api.updateEvent(d.id, {
           type: d.type, title: d.title.trim(), monthKey: d.monthKey, date: d.date || null,
-          status: d.status, notes: d.notes || null,
+          lieu: d.lieu || null, status: d.status, notes: d.notes || null,
         });
         setEvents((list) => list.map((e) => (e.id === d.id ? updated : e)));
       }
@@ -482,6 +526,16 @@ export default function App() {
   const toggleStatus = (key) =>
     setStatusFilter((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
+  const homeResults = useMemo(() => {
+    const q = normalize(search.trim());
+    const list = q ? events.filter((e) => normalize(e.title).includes(q)) : events;
+    return [...list].sort((a, b) => {
+      const ak = (a.monthKey || "") + (a.date || "");
+      const bk = (b.monthKey || "") + (b.date || "");
+      return ak.localeCompare(bk);
+    });
+  }, [events, search]);
+
   if (authState === "checking") {
     return (
       <div className="cf-root">
@@ -542,6 +596,14 @@ export default function App() {
             </select>
           </div>
         </div>
+        <div className="cf-viewtoggle">
+          <button className="cf-vt" aria-pressed={view === "accueil"} onClick={() => setView("accueil")}>
+            <Home size={14} /> Accueil
+          </button>
+          <button className="cf-vt" aria-pressed={view === "frise"} onClick={() => setView("frise")}>
+            <CalendarDays size={14} /> Frise
+          </button>
+        </div>
         <div className="cf-spacer" />
         <div className={"cf-me" + (nameFlash ? " flash" : "")}>
           <label htmlFor="cf-name">Vous êtes</label>
@@ -557,6 +619,77 @@ export default function App() {
 
       <div className="cf-rule" />
 
+      {view === "accueil" ? (
+        <div className="cf-home">
+          <div className="cf-search-wrap">
+            <Search size={16} className="cf-search-icon" />
+            <input className="cf-search-input" type="search" value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un événement par son nom…" aria-label="Rechercher un événement" />
+          </div>
+
+          {loadError && <div className="cf-note error">{loadError}</div>}
+
+          {loaded && total === 0 ? (
+            <div className="cf-empty" style={{ flex: "none" }}>
+              <b>La saison est encore vierge</b>
+              <span>Posez le premier jalon : une soirée, une conférence, un tentadero… Chaque membre du bureau peut ajouter ses propositions, créer ses propres catégories et voter pour les idées des autres.</span>
+              <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={() => openAdd()}>
+                <Plus size={16} /> Premier événement
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className="cf-search-count">
+                {homeResults.length} événement{homeResults.length > 1 ? "s" : ""}
+                {search.trim() ? ` trouvé${homeResults.length > 1 ? "s" : ""}` : " au programme"}
+              </span>
+              <div className="cf-search-list">
+                {homeResults.map((ev) => {
+                  const t = catById[ev.type] || NEUTRAL;
+                  const st = STATUSES[ev.status] || STATUSES.idee;
+                  const when = fmtDate(ev.date);
+                  const mo = months.find((m) => m.key === ev.monthKey);
+                  const net = (Number(ev.revenue) || 0) - (Number(ev.expenses) || 0);
+                  const hasFinance = ev.revenue != null || ev.expenses != null;
+                  return (
+                    <div className="cf-search-card" key={ev.id} tabIndex={0} role="button"
+                      aria-label={"Ouvrir le bilan : " + ev.title}
+                      onClick={() => openDetail(ev)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(ev); } }}>
+                      <span className="stripe" style={{ background: t.color, opacity: st.op }} />
+                      <div className="cf-search-card-main">
+                        <div className="cf-card-title">{ev.title}</div>
+                        <div className="cf-card-meta">
+                          {mo && <span>{MONTHS_LONG[mo.m]} {mo.y}</span>}
+                          {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
+                          <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
+                          {ev.lieu && <span><MapPin size={11} style={{ verticalAlign: -1 }} /> {ev.lieu}</span>}
+                        </div>
+                      </div>
+                      <div className="cf-search-card-stats">
+                        <span className="cf-pill" style={{ color: ev.status === "confirme" ? t.color : "#9a8d7c" }}>
+                          {ev.status === "confirme" && <Check size={10} style={{ marginRight: 3, verticalAlign: -1 }} />}
+                          {st.label}
+                        </span>
+                        {ev.registered != null && <span>{ev.registered} inscrit{ev.registered > 1 ? "s" : ""}</span>}
+                        {hasFinance && <span>Recettes {eur(ev.revenue)} · Dépenses {eur(ev.expenses)}</span>}
+                        {hasFinance && (
+                          <span className={net >= 0 ? "pos" : "neg"}>Net {net > 0 ? "+" : ""}{eur(net)}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {homeResults.length === 0 && (
+                  <div className="cf-search-empty">Aucun événement ne correspond à « {search} ».</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+      <>
       <div className="cf-controls">
         <div className="cf-legend">
           {categories.map((c) => (
@@ -619,6 +752,7 @@ export default function App() {
                     <div className="cf-card-meta">
                       {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
                       <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
+                      {ev.lieu && <span><MapPin size={11} style={{ verticalAlign: -1 }} /> {ev.lieu}</span>}
                       {ev.proposedBy && <span>· par {ev.proposedBy}</span>}
                     </div>
                     {hasStats && (
@@ -661,6 +795,8 @@ export default function App() {
         </span>
         <span style={{ marginLeft: "auto", fontStyle: "italic" }}>Événements et catégories sont partagés entre les membres du bureau.</span>
       </div>
+      </>
+      )}
 
       {/* event modal */}
       {modal && (
@@ -708,6 +844,12 @@ export default function App() {
                     onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, date: e.target.value } }))} />
                 </label>
               </div>
+              <label className="cf-field">
+                <span>Lieu (facultatif)</span>
+                <input className="cf-input" value={modal.draft.lieu || ""}
+                  placeholder="ex. Salle des fêtes, Orthez"
+                  onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, lieu: e.target.value } }))} />
+              </label>
               <div className="cf-field">
                 <span>Statut</span>
                 <div className="cf-pickrow">
@@ -811,6 +953,7 @@ export default function App() {
                 <div className="cf-detail-meta">
                   <span style={{ color: t.color, fontWeight: 700 }}>{t.label}</span>
                   <span>{mo ? `${MONTHS_LONG[mo.m]} ${mo.y}` : ""}{when ? ` · ${when}` : ""}</span>
+                  {ev.lieu && <span><MapPin size={12} style={{ verticalAlign: -1 }} /> {ev.lieu}</span>}
                   <span>· {STATUSES[ev.status]?.label}</span>
                   {ev.proposedBy && <span>· par {ev.proposedBy}</span>}
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>

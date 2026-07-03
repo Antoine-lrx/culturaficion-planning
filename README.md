@@ -5,6 +5,11 @@ tentaderos prácticos, retransmissions, assemblée générale…), sous forme de
 frise sur 12 mois. Interface « cartel taurin » (rouge, sable, or, encre),
 partagée entre les membres du bureau via un code d'accès unique.
 
+Deux vues, accessibles via le bouton en haut de page : **Accueil** (recherche
+d'un événement par son nom, avec sa fiche complète) et **Frise** (le planning
+sur 12 mois). Pas de vrai routeur d'URL — juste une bascule d'état côté
+client, plus simple et plus robuste sur de l'hébergement statique.
+
 - **Frontend** : React + Vite, hébergé sur **Cloudflare Pages**.
 - **Backend** : **Cloudflare Pages Functions** (dossier `functions/`).
 - **Base de données** : **Cloudflare D1** (`culturaficion_planning`, juridiction UE).
@@ -134,6 +139,14 @@ bord).
 4. La commande affiche un résultat JSON confirmant la création des tables
    `events`, `categories`, `meta` et l'insertion des 6 catégories par
    défaut.
+5. Le dossier `migrations/` peut contenir d'autres fichiers numérotés,
+   ajoutés au fil des évolutions (ex. `0002_add_lieu.sql`). Appliquez-les
+   **dans l'ordre des numéros**, avec la même commande :
+   ```
+   npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0002_add_lieu.sql
+   ```
+   Une base déjà en place n'a besoin que des migrations qu'elle n'a pas
+   encore reçues ; une base toute neuve doit tous les recevoir dans l'ordre.
 
 ### Étape 7 — Redéployer et tester
 

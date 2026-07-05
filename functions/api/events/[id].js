@@ -24,6 +24,7 @@ export async function onRequestPut({ request, env, params }) {
     monthKey: body.monthKey ?? existing.month_key,
     date: body.date !== undefined ? body.date : existing.date,
     lieu: body.lieu !== undefined ? body.lieu : existing.lieu,
+    helloassoSlug: body.helloassoSlug !== undefined ? body.helloassoSlug : existing.helloasso_slug,
     status: body.status ?? existing.status,
     proposedBy: body.proposedBy !== undefined ? body.proposedBy : existing.proposed_by,
     voters: body.voters !== undefined ? JSON.stringify(body.voters) : existing.voters,
@@ -34,10 +35,10 @@ export async function onRequestPut({ request, env, params }) {
   };
 
   await env.DB.prepare(
-    `UPDATE events SET type=?, title=?, month_key=?, date=?, lieu=?, status=?, proposed_by=?, voters=?, notes=?, registered=?, revenue=?, expenses=?
+    `UPDATE events SET type=?, title=?, month_key=?, date=?, lieu=?, helloasso_slug=?, status=?, proposed_by=?, voters=?, notes=?, registered=?, revenue=?, expenses=?
      WHERE id=?`
   ).bind(
-    merged.type, merged.title, merged.monthKey, merged.date, merged.lieu, merged.status, merged.proposedBy,
+    merged.type, merged.title, merged.monthKey, merged.date, merged.lieu, merged.helloassoSlug, merged.status, merged.proposedBy,
     merged.voters, merged.notes, merged.registered, merged.revenue, merged.expenses, id
   ).run();
 

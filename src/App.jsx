@@ -239,6 +239,7 @@ html, body{
 .cf-pick[aria-pressed="true"] .dot{outline:2px solid var(--albero);outline-offset:1px}
 .cf-modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:0 20px 20px}
 .cf-hint{font-size:12px;color:var(--sangre);font-weight:600}
+.cf-subhint{font-size:11.5px;color:#8a7f72;font-weight:500}
 
 .cf-catlist{display:flex;flex-direction:column;gap:8px}
 .cf-catrow{display:flex;align-items:center;gap:9px;background:var(--blanco);border:1px solid rgba(26,20,19,.14);
@@ -269,6 +270,10 @@ html, body{
 .cf-stat.net{grid-column:1 / -1;background:var(--tinta);border-color:var(--tinta)}
 .cf-stat.net>span{color:rgba(247,245,238,.72)}
 .cf-stat.net .val{font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:.02em}
+.cf-stat.ha{background:rgba(53,94,138,.08);border-color:rgba(53,94,138,.22)}
+.cf-stat.ha .val{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:.02em;color:var(--tinta)}
+.cf-stat.ha .msg{font-size:12.5px;color:#7a6f63;font-weight:500;display:inline-flex;align-items:center;gap:5px}
+.cf-stat.ha .spin{animation:cf-spin 1s linear infinite}
 .cf-detail-meta{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:13px;color:#7a6f63;margin-bottom:2px}
 
 .cf-gate{min-height:100vh;display:grid;place-items:center;padding:18px}
@@ -324,6 +329,7 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [statsDraft, setStatsDraft] = useState({ registered: "", revenue: "", expenses: "" });
+  const [haStats, setHaStats] = useState({ status: "idle", registered: null, revenue: null });
   const [catModal, setCatModal] = useState(false);
   const [newCat, setNewCat] = useState({ label: "", color: NEW_CAT_COLORS[0] });
   const [nameFlash, setNameFlash] = useState(false);
@@ -401,7 +407,7 @@ export default function App() {
     if (!me.trim()) return requireName();
     setModal({ mode: "add", draft: {
       id: uid(), type: categories[0]?.id || "autre", title: "",
-      monthKey: monthKey || months[0].key, date: "", lieu: "", status: "idee",
+      monthKey: monthKey || months[0].key, date: "", lieu: "", helloassoSlug: "", status: "idee",
       notes: "", proposedBy: me.trim(), voters: [],
     }});
   };
@@ -414,14 +420,15 @@ export default function App() {
       if (modal.mode === "add") {
         const created = await api.createEvent({
           id: d.id, type: d.type, title: d.title.trim(), monthKey: d.monthKey,
-          date: d.date || null, lieu: d.lieu || null, status: d.status, proposedBy: d.proposedBy || null,
+          date: d.date || null, lieu: d.lieu || null, helloassoSlug: d.helloassoSlug || null,
+          status: d.status, proposedBy: d.proposedBy || null,
           notes: d.notes || null,
         });
         setEvents((list) => [...list, created]);
       } else {
         const updated = await api.updateEvent(d.id, {
           type: d.type, title: d.title.trim(), monthKey: d.monthKey, date: d.date || null,
-          lieu: d.lieu || null, status: d.status, notes: d.notes || null,
+          lieu: d.lieu || null, helloassoSlug: d.helloassoSlug || null, status: d.status, notes: d.notes || null,
         });
         setEvents((list) => list.map((e) => (e.id === d.id ? updated : e)));
       }
@@ -447,6 +454,14 @@ export default function App() {
       revenue: ev.revenue != null ? String(ev.revenue) : "",
       expenses: ev.expenses != null ? String(ev.expenses) : "",
     });
+    if (ev.helloassoSlug) {
+      setHaStats({ status: "loading", registered: null, revenue: null });
+      api.getHelloAsso(ev.helloassoSlug)
+        .then((res) => setHaStats({ status: "ok", registered: res.registered, revenue: res.revenue }))
+        .catch(() => setHaStats({ status: "error", registered: null, revenue: null }));
+    } else {
+      setHaStats({ status: "idle", registered: null, revenue: null });
+    }
   };
   const saveStat = async (id, patch) => {
     setEvents((list) => list.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -952,6 +967,13 @@ export default function App() {
                   placeholder="ex. Salle des fêtes, Orthez"
                   onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, lieu: e.target.value } }))} />
               </label>
+              <label className="cf-field">
+                <span>Identifiant HelloAsso (billetterie, facultatif)</span>
+                <input className="cf-input" value={modal.draft.helloassoSlug || ""}
+                  placeholder="ex. conference-orthez-2026"
+                  onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, helloassoSlug: e.target.value } }))} />
+                <span className="cf-subhint">Le nom de la billetterie tel qu'il apparaît dans son URL HelloAsso.</span>
+              </label>
               <div className="cf-field">
                 <span>Statut</span>
                 <div className="cf-pickrow">
@@ -1084,6 +1106,26 @@ export default function App() {
                       onChange={(e) => setStatsDraft((s) => ({ ...s, expenses: e.target.value }))}
                       onBlur={() => saveStat(ev.id, { expenses: numOrNull(statsDraft.expenses) })} />
                   </label>
+                  {ev.helloassoSlug && (
+                    <div className="cf-stat ha">
+                      <span><Users size={13} /> Inscrits HelloAsso</span>
+                      {haStats.status === "loading" && (
+                        <span className="msg"><Loader2 size={13} className="spin" /> Chargement…</span>
+                      )}
+                      {haStats.status === "error" && <span className="msg">Données HelloAsso indisponibles</span>}
+                      {haStats.status === "ok" && <span className="val">{haStats.registered}</span>}
+                    </div>
+                  )}
+                  {ev.helloassoSlug && (
+                    <div className="cf-stat ha">
+                      <span><Wallet size={13} /> Recettes HelloAsso</span>
+                      {haStats.status === "loading" && (
+                        <span className="msg"><Loader2 size={13} className="spin" /> Chargement…</span>
+                      )}
+                      {haStats.status === "error" && <span className="msg">Données HelloAsso indisponibles</span>}
+                      {haStats.status === "ok" && <span className="val">{eur(haStats.revenue)}</span>}
+                    </div>
+                  )}
                   <div className="cf-stat net">
                     <span><Scale size={13} /> Résultat net</span>
                     <span className="val" style={{ color: net >= 0 ? "#7FB98A" : "#E98A84" }}>

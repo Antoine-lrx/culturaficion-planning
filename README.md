@@ -215,10 +215,92 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
 
 ## 5. Schéma de données (D1)
 
-- `events` : `id`, `type`, `title`, `month_key`, `date`, `status`,
-  `proposed_by`, `voters` (JSON), `notes`, `registered`, `revenue`,
-  `expenses`, `created_at`.
+- `events` : `id`, `type`, `title`, `month_key`, `date`, `lieu`,
+  `helloasso_slug`, `status`, `proposed_by`, `voters` (JSON), `notes`,
+  `registered`, `revenue`, `expenses`, `created_at`.
 - `categories` : `id`, `label`, `color`, `position`.
 - `meta` : `key` / `value` (utilisé pour `startYear` et `startMonth`).
 
 Voir `migrations/0001_init.sql` pour le détail et les catégories par défaut.
+
+---
+
+## 6. Intégration HelloAsso (billetterie)
+
+Chaque événement peut porter un champ optionnel « Identifiant HelloAsso »
+(le `formSlug` de sa billetterie). S'il est renseigné, la fiche bilan
+appelle un endpoint serveur qui récupère, auprès de l'API HelloAsso, le
+nombre d'inscriptions et les recettes validées, et les affiche à côté des
+champs saisis à la main (sans les remplacer, et sans entrer dans le calcul
+du résultat net).
+
+Aucun identifiant HelloAsso n'est exposé au frontend : tout passe par
+l'endpoint serveur `GET /api/helloasso/:formSlug`, protégé par le même code
+d'accès que le reste de l'app.
+
+### Étape A — Créer les identifiants API sur HelloAsso
+
+1. Connectez-vous sur [helloasso.com](https://www.helloasso.com) avec le
+   compte de l'association.
+2. Allez dans **Mon compte** → **Intégrations et API**.
+3. Créez une clé API (« Créer une clé d'API » ou équivalent). HelloAsso vous
+   donne un **Client ID** et un **Client secret** — copiez-les, ils ne sont
+   affichés qu'une fois.
+4. Si HelloAsso propose un environnement **sandbox** (bac à sable) pour
+   tester sans toucher aux vraies billetteries, préférez-le pour les
+   premiers essais ; sinon utilisez directement les identifiants de
+   production (aucun risque : l'app ne fait que lire des chiffres agrégés).
+
+### Étape B — Définir les variables d'environnement Cloudflare
+
+Dans le tableau de bord Cloudflare Pages du projet → **Settings** →
+**Environment variables**, ajoutez (comme pour `ACCESS_CODE` à l'étape 5) :
+
+- `HELLOASSO_CLIENT_ID` (Secret) — le Client ID de l'étape A.
+- `HELLOASSO_CLIENT_SECRET` (Secret) — le Client secret de l'étape A.
+- `HELLOASSO_ORG_SLUG` — le nom de l'association tel qu'il apparaît dans
+  l'URL HelloAsso (ex. pour `https://www.helloasso.com/associations/culturaficion`,
+  la valeur est `culturaficion`).
+- `HELLOASSO_FORM_TYPE` — probablement `Event`, à confirmer à l'étape C.
+  Si la variable n'est pas définie, `Event` est utilisé par défaut.
+
+Redéployez ensuite (un nouveau `git push` suffit) pour que ces variables
+soient prises en compte.
+
+### Étape C — Vérifier `formType` et l'état « validé »
+
+Ces deux détails dépendent de la structure exacte des réponses HelloAsso et
+sont à vérifier une fois avant la mise en production, avec un événement de
+test ayant déjà une billetterie active :
+
+1. Renseignez son `helloasso_slug` dans sa fiche (voir Étape D) et ouvrez sa
+   fiche bilan. Si HelloAsso répond une erreur, le message « Données
+   HelloAsso indisponibles » s'affiche — c'est le signe qu'il faut ajuster
+   `HELLOASSO_FORM_TYPE` (essayez `Event`, puis d'autres valeurs si besoin :
+   HelloAsso distingue plusieurs types de formulaires selon la nature de la
+   billetterie).
+2. Le code ne retient que les paiements dont l'état vaut `processed`
+   (insensible à la casse) — c'est le nom d'état le plus courant pour un
+   paiement validé chez HelloAsso. S'il s'avère que les chiffres affichés
+   ne correspondent pas à ceux du tableau de bord HelloAsso pour cet
+   événement de test, il faudra ajuster la constante `VALID_STATE` dans
+   `functions/api/helloasso/[formSlug].js`.
+
+### Étape D — Renseigner un événement et tester
+
+1. Ouvrez (ou créez) un événement ayant déjà une billetterie HelloAsso
+   active, cliquez sur **Modifier l'événement**.
+2. Dans le champ **Identifiant HelloAsso (billetterie)**, renseignez le
+   `formSlug` — le segment qui suit `/formulaire/` (ou similaire) dans
+   l'URL publique de la billetterie sur HelloAsso.
+3. Enregistrez, puis ouvrez la fiche bilan de cet événement : après un
+   court chargement, **Inscrits HelloAsso** et **Recettes HelloAsso**
+   doivent apparaître avec des valeurs cohérentes.
+4. Comparez ces chiffres à ceux affichés dans le tableau de bord HelloAsso
+   de l'association pour cette même billetterie.
+
+### Migration à appliquer
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0003_add_helloasso_slug.sql
+```

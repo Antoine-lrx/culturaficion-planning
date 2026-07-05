@@ -81,4 +81,6 @@ export const api = {
   deleteCategory: (id) => request(`/api/categories/${id}`, { method: "DELETE" }),
 
   updateMeta: (patch) => request("/api/meta", { method: "PUT", body: patch }),
+
+  getHelloAsso: (formSlug) => request(`/api/helloasso/${encodeURIComponent(formSlug)}`),
 };

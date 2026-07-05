@@ -54,11 +54,10 @@ async function getAccessToken(env) {
 }
 
 // Garde-fou : une invocation Cloudflare Pages Function ne peut faire qu'un
-// nombre limité de sous-requêtes réseau (fetch). Sans plafond, une pagination
-// qui ne progresse pas (mauvais nom de champ, jeton mal relu…) boucle jusqu'à
-// heurter cette limite avec un message peu clair. On plafonne donc le nombre
-// de pages et on détecte explicitement une pagination qui ne progresse pas.
+// nombre limité de sous-requêtes réseau (fetch). On plafonne donc le nombre
+// de pages par précaution.
 const MAX_PAGES = 20;
+const PAGE_SIZE = 100;
 
 async function fetchAggregates(env, formSlug, accessToken) {
   const formType = env.HELLOASSO_FORM_TYPE || "Event";
@@ -74,7 +73,7 @@ async function fetchAggregates(env, formSlug, accessToken) {
     const url = new URL(
       `${API_BASE}/organizations/${orgSlug}/forms/${formType}/${formSlug}/items`
     );
-    url.searchParams.set("pageSize", "100");
+    url.searchParams.set("pageSize", String(PAGE_SIZE));
     if (continuationToken) url.searchParams.set("continuationToken", continuationToken);
 
     const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
@@ -83,27 +82,23 @@ async function fetchAggregates(env, formSlug, accessToken) {
       throw new Error(`Appel à ${url.pathname} en échec (statut ${res.status}) : ${body.slice(0, 300)}`);
     }
     const data = await res.json();
-    console.log(
-      `HelloAsso ${formSlug} page ${page} : ${(data.data || []).length} items, pagination=${JSON.stringify(data.pagination)}`
-    );
+    const items = data.data || [];
+    const statesSeen = [...new Set(items.map((it) => it.state))];
+    console.log(`HelloAsso ${formSlug} page ${page} : ${items.length} items, états=${JSON.stringify(statesSeen)}.`);
 
-    for (const item of data.data || []) {
+    for (const item of items) {
       if (String(item.state || "").toLowerCase() === VALID_STATE) {
         registered += 1;
         revenueCents += Number(item.amount) || 0;
       }
     }
 
-    const nextToken = (data.pagination && data.pagination.continuationToken) || "";
-    if (nextToken && nextToken === continuationToken) {
-      throw new Error("La pagination HelloAsso ne progresse pas (continuationToken inchangé).");
-    }
-    continuationToken = nextToken;
+    // HelloAsso renvoie un continuationToken même sur la dernière page : le
+    // signal fiable de fin de pagination est une page reçue plus courte que
+    // la taille demandée, pas la présence du jeton.
+    continuationToken =
+      items.length === PAGE_SIZE ? (data.pagination && data.pagination.continuationToken) || "" : "";
   } while (continuationToken && page < MAX_PAGES);
-
-  if (continuationToken) {
-    console.log(`HelloAsso ${formSlug} : plafond de ${MAX_PAGES} pages atteint, agrégats partiels.`);
-  }
 
   return { registered, revenue: Math.round(revenueCents) / 100 };
 }

@@ -26,7 +26,10 @@ export async function onRequestGet({ request, env, params }) {
     const accessToken = await getAccessToken(env);
     const aggregates = await fetchAggregates(env, formSlug, accessToken);
     return json(aggregates);
-  } catch {
+  } catch (err) {
+    // Détail utile dans les logs Cloudflare (wrangler pages deployment tail) pour le
+    // diagnostic — jamais renvoyé au frontend, qui ne reçoit que le message générique.
+    console.error("HelloAsso:", err && err.message);
     return json({ error: "Données HelloAsso indisponibles." }, { status: 502 });
   }
 }
@@ -41,7 +44,10 @@ async function getAccessToken(env) {
       client_secret: env.HELLOASSO_CLIENT_SECRET,
     }),
   });
-  if (!res.ok) throw new Error("Échec de l'authentification HelloAsso.");
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Échec de l'authentification HelloAsso (statut ${res.status}) : ${body.slice(0, 300)}`);
+  }
   const data = await res.json();
   if (!data.access_token) throw new Error("Jeton HelloAsso absent de la réponse.");
   return data.access_token;
@@ -63,7 +69,10 @@ async function fetchAggregates(env, formSlug, accessToken) {
     if (continuationToken) url.searchParams.set("continuationToken", continuationToken);
 
     const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw new Error("Appel à l'API HelloAsso en échec.");
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Appel à ${url.pathname} en échec (statut ${res.status}) : ${body.slice(0, 300)}`);
+    }
     const data = await res.json();
 
     for (const item of data.data || []) {

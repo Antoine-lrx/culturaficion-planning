@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   Plus, Heart, Trash2, Pencil, X, RefreshCw,
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
-  Users, Wallet, Scale, Lock, Loader2, Home, Search, MapPin,
+  Users, Wallet, Scale, Lock, Loader2, Home, Search, MapPin, List,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 
@@ -106,6 +106,22 @@ html, body{
   display:inline-flex;align-items:center;gap:6px;transition:.12s}
 .cf-vt[aria-pressed="true"]{background:var(--tinta);color:var(--albero);border-color:var(--tinta)}
 .cf-vt:hover{border-color:var(--sangre)}
+
+.cf-accueil{display:flex;justify-content:center;align-items:flex-start;min-height:min(56vh,520px);padding-top:clamp(20px,8vh,90px)}
+.cf-accueil-inner{width:min(560px,100%);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+.cf-accueil-kicker{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--sangre);font-weight:600}
+.cf-accueil-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(30px,5vw,44px);line-height:.9;letter-spacing:.01em;margin:0 0 6px}
+.cf-accueil .cf-search-wrap{width:100%}
+.cf-accueil .cf-search-input{padding-top:15px;padding-bottom:15px;font-size:16px;text-align:left}
+.cf-suggestions{width:100%;display:flex;flex-direction:column;gap:6px;text-align:left}
+.cf-suggestion{appearance:none;cursor:pointer;font-family:inherit;text-align:left;background:var(--blanco);
+  border:1px solid rgba(26,20,19,.14);border-radius:11px;padding:11px 14px;display:flex;align-items:center;gap:10px;
+  transition:.12s}
+.cf-suggestion:hover{border-color:var(--sangre);box-shadow:0 4px 12px rgba(26,20,19,.1)}
+.cf-suggestion .dot{width:9px;height:9px;border-radius:3px;flex:none}
+.cf-suggestion-title{font-size:14px;font-weight:600;color:var(--tinta);flex:1 1 auto;min-width:0}
+.cf-suggestion-meta{font-size:11.5px;color:#7a6f63;white-space:nowrap}
+.cf-suggestion-empty{color:#8a7d6e;font-size:13px;padding:16px;text-align:center;border:1px dashed rgba(26,20,19,.2);border-radius:11px}
 
 .cf-home{display:flex;flex-direction:column;gap:12px;margin-top:8px}
 .cf-search-wrap{position:relative}
@@ -272,6 +288,7 @@ html, body{
   .cf-me input{width:96px}
   .cf-statusfilter{margin-left:0}
   .cf-search-card{flex-direction:column;align-items:flex-start}
+  .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
 }
 @media (prefers-reduced-motion:reduce){.cf-root *{transition:none!important;animation:none!important}}
 .cf-root :focus-visible{outline:2px solid var(--sangre);outline-offset:2px;border-radius:6px}
@@ -291,9 +308,10 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [codeInput, setCodeInput] = useState("");
 
-  // "accueil" (recherche) ou "frise" (planning 12 mois)
+  // "accueil" (recherche rapide) | "liste" (parcours filtrable) | "frise" (planning 12 mois)
   const [view, setView] = useState("accueil");
-  const [search, setSearch] = useState("");
+  const [accueilQuery, setAccueilQuery] = useState("");
+  const [listSearch, setListSearch] = useState("");
 
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATS);
@@ -526,15 +544,29 @@ export default function App() {
   const toggleStatus = (key) =>
     setStatusFilter((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  const homeResults = useMemo(() => {
-    const q = normalize(search.trim());
-    const list = q ? events.filter((e) => normalize(e.title).includes(q)) : events;
-    return [...list].sort((a, b) => {
+  const accueilSuggestions = useMemo(() => {
+    const q = normalize(accueilQuery.trim());
+    if (!q) return [];
+    return events
+      .filter((e) => normalize(e.title).includes(q))
+      .sort((a, b) => {
+        const aStarts = normalize(a.title).startsWith(q) ? 0 : 1;
+        const bStarts = normalize(b.title).startsWith(q) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        return a.title.localeCompare(b.title);
+      })
+      .slice(0, 8);
+  }, [events, accueilQuery]);
+
+  const listResults = useMemo(() => {
+    const q = normalize(listSearch.trim());
+    const base = q ? visible.filter((e) => normalize(e.title).includes(q)) : visible;
+    return [...base].sort((a, b) => {
       const ak = (a.monthKey || "") + (a.date || "");
       const bk = (b.monthKey || "") + (b.date || "");
       return ak.localeCompare(bk);
     });
-  }, [events, search]);
+  }, [visible, listSearch]);
 
   if (authState === "checking") {
     return (
@@ -600,6 +632,9 @@ export default function App() {
           <button className="cf-vt" aria-pressed={view === "accueil"} onClick={() => setView("accueil")}>
             <Home size={14} /> Accueil
           </button>
+          <button className="cf-vt" aria-pressed={view === "liste"} onClick={() => setView("liste")}>
+            <List size={14} /> Liste
+          </button>
           <button className="cf-vt" aria-pressed={view === "frise"} onClick={() => setView("frise")}>
             <CalendarDays size={14} /> Frise
           </button>
@@ -619,16 +654,83 @@ export default function App() {
 
       <div className="cf-rule" />
 
-      {view === "accueil" ? (
+      {loadError && <div className="cf-note error">{loadError}</div>}
+
+      {view === "accueil" && (
+        <div className="cf-accueil">
+          <div className="cf-accueil-inner">
+            <span className="cf-accueil-kicker">Recherche rapide</span>
+            <h1 className="cf-accueil-title">Trouver un <span style={{ color: "var(--sangre)" }}>événement</span></h1>
+            <div className="cf-search-wrap">
+              <Search size={16} className="cf-search-icon" />
+              <input className="cf-search-input" type="search" value={accueilQuery} autoFocus
+                onChange={(e) => setAccueilQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && accueilSuggestions.length === 1) {
+                    openDetail(accueilSuggestions[0]);
+                    setAccueilQuery("");
+                  }
+                }}
+                placeholder="Tapez le nom d'un événement…" aria-label="Rechercher un événement" />
+            </div>
+            {accueilQuery.trim() && (
+              <div className="cf-suggestions">
+                {accueilSuggestions.length === 0 && (
+                  <div className="cf-suggestion-empty">Aucun événement ne correspond à « {accueilQuery} ».</div>
+                )}
+                {accueilSuggestions.map((ev) => {
+                  const t = catById[ev.type] || NEUTRAL;
+                  const when = fmtDate(ev.date);
+                  const mo = months.find((m) => m.key === ev.monthKey);
+                  return (
+                    <button className="cf-suggestion" key={ev.id}
+                      onClick={() => { openDetail(ev); setAccueilQuery(""); }}>
+                      <span className="dot" style={{ background: t.color }} />
+                      <span className="cf-suggestion-title">{ev.title}</span>
+                      <span className="cf-suggestion-meta">
+                        {mo ? `${MONTHS_LONG[mo.m]} ${mo.y}` : ""}{when ? ` · ${when}` : ""}
+                        {ev.lieu ? ` · ${ev.lieu}` : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {view === "liste" && (
+        <div className="cf-controls">
+          <div className="cf-legend">
+            {categories.map((c) => (
+              <button key={c.id} className="cf-chip" aria-pressed={!hiddenTypes.has(c.id)} onClick={() => toggleHidden(c.id)}>
+                <span className="dot" style={{ background: c.color }} />
+                {c.label}
+              </button>
+            ))}
+            <button className="cf-chip manage" onClick={() => setCatModal(true)}>
+              <Tags size={13} /> Catégories
+            </button>
+          </div>
+          <div className="cf-statusfilter">
+            {STATUS_KEYS.map((k) => (
+              <button key={k} className="cf-sf" aria-pressed={statusFilter.has(k)} onClick={() => toggleStatus(k)}>
+                {STATUSES[k].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === "liste" && (
         <div className="cf-home">
           <div className="cf-search-wrap">
             <Search size={16} className="cf-search-icon" />
-            <input className="cf-search-input" type="search" value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher un événement par son nom…" aria-label="Rechercher un événement" />
+            <input className="cf-search-input" type="search" value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder="Filtrer par nom d'événement…" aria-label="Filtrer les événements par nom" />
           </div>
-
-          {loadError && <div className="cf-note error">{loadError}</div>}
 
           {loaded && total === 0 ? (
             <div className="cf-empty" style={{ flex: "none" }}>
@@ -641,11 +743,11 @@ export default function App() {
           ) : (
             <>
               <span className="cf-search-count">
-                {homeResults.length} événement{homeResults.length > 1 ? "s" : ""}
-                {search.trim() ? ` trouvé${homeResults.length > 1 ? "s" : ""}` : " au programme"}
+                {listResults.length} événement{listResults.length > 1 ? "s" : ""}
+                {listSearch.trim() ? ` trouvé${listResults.length > 1 ? "s" : ""}` : " au programme"}
               </span>
               <div className="cf-search-list">
-                {homeResults.map((ev) => {
+                {listResults.map((ev) => {
                   const t = catById[ev.type] || NEUTRAL;
                   const st = STATUSES[ev.status] || STATUSES.idee;
                   const when = fmtDate(ev.date);
@@ -681,14 +783,16 @@ export default function App() {
                     </div>
                   );
                 })}
-                {homeResults.length === 0 && (
-                  <div className="cf-search-empty">Aucun événement ne correspond à « {search} ».</div>
+                {listResults.length === 0 && (
+                  <div className="cf-search-empty">Aucun événement ne correspond à « {listSearch} ».</div>
                 )}
               </div>
             </>
           )}
         </div>
-      ) : (
+      )}
+
+      {view === "frise" && (
       <>
       <div className="cf-controls">
         <div className="cf-legend">
@@ -710,8 +814,6 @@ export default function App() {
           ))}
         </div>
       </div>
-
-      {loadError && <div className="cf-note error">{loadError}</div>}
 
       <div className="cf-frise">
         {loaded && total === 0 && (

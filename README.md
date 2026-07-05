@@ -5,10 +5,15 @@ tentaderos prácticos, retransmissions, assemblée générale…), sous forme de
 frise sur 12 mois. Interface « cartel taurin » (rouge, sable, or, encre),
 partagée entre les membres du bureau via un code d'accès unique.
 
-Deux vues, accessibles via le bouton en haut de page : **Accueil** (recherche
-d'un événement par son nom, avec sa fiche complète) et **Frise** (le planning
-sur 12 mois). Pas de vrai routeur d'URL — juste une bascule d'état côté
-client, plus simple et plus robuste sur de l'hébergement statique.
+Trois vues, accessibles via les boutons en haut de page :
+- **Accueil** — recherche rapide, centrée, avec suggestions en direct ;
+  cliquer sur une suggestion ouvre directement la fiche de l'événement.
+- **Liste** — tous les événements, filtrables par nom, catégorie et statut.
+- **Frise** — le planning sur 12 mois (vue historique, inchangée).
+
+Pas de vrai routeur d'URL — juste une bascule d'état côté client, plus
+simple et plus robuste sur de l'hébergement statique. Les trois vues
+partagent la même fiche de bilan (même composant, pas de duplication).
 
 - **Frontend** : React + Vite, hébergé sur **Cloudflare Pages**.
 - **Backend** : **Cloudflare Pages Functions** (dossier `functions/`).

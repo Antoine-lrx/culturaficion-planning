@@ -53,6 +53,13 @@ async function getAccessToken(env) {
   return data.access_token;
 }
 
+// Garde-fou : une invocation Cloudflare Pages Function ne peut faire qu'un
+// nombre limité de sous-requêtes réseau (fetch). Sans plafond, une pagination
+// qui ne progresse pas (mauvais nom de champ, jeton mal relu…) boucle jusqu'à
+// heurter cette limite avec un message peu clair. On plafonne donc le nombre
+// de pages et on détecte explicitement une pagination qui ne progresse pas.
+const MAX_PAGES = 20;
+
 async function fetchAggregates(env, formSlug, accessToken) {
   const formType = env.HELLOASSO_FORM_TYPE || "Event";
   const orgSlug = env.HELLOASSO_ORG_SLUG;
@@ -60,8 +67,10 @@ async function fetchAggregates(env, formSlug, accessToken) {
   let registered = 0;
   let revenueCents = 0;
   let continuationToken = "";
+  let page = 0;
 
   do {
+    page += 1;
     const url = new URL(
       `${API_BASE}/organizations/${orgSlug}/forms/${formType}/${formSlug}/items`
     );
@@ -74,6 +83,9 @@ async function fetchAggregates(env, formSlug, accessToken) {
       throw new Error(`Appel à ${url.pathname} en échec (statut ${res.status}) : ${body.slice(0, 300)}`);
     }
     const data = await res.json();
+    console.log(
+      `HelloAsso ${formSlug} page ${page} : ${(data.data || []).length} items, pagination=${JSON.stringify(data.pagination)}`
+    );
 
     for (const item of data.data || []) {
       if (String(item.state || "").toLowerCase() === VALID_STATE) {
@@ -82,8 +94,16 @@ async function fetchAggregates(env, formSlug, accessToken) {
       }
     }
 
-    continuationToken = (data.pagination && data.pagination.continuationToken) || "";
-  } while (continuationToken);
+    const nextToken = (data.pagination && data.pagination.continuationToken) || "";
+    if (nextToken && nextToken === continuationToken) {
+      throw new Error("La pagination HelloAsso ne progresse pas (continuationToken inchangé).");
+    }
+    continuationToken = nextToken;
+  } while (continuationToken && page < MAX_PAGES);
+
+  if (continuationToken) {
+    console.log(`HelloAsso ${formSlug} : plafond de ${MAX_PAGES} pages atteint, agrégats partiels.`);
+  }
 
   return { registered, revenue: Math.round(revenueCents) / 100 };
 }

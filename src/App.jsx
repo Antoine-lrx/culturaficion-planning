@@ -65,11 +65,6 @@ function seasonStartYear(seasonKey) {
 function seasonKeyFromStart(y) {
   return `${y}-${y + 1}`;
 }
-function currentSeasonKey() {
-  const now = new Date();
-  const y = now.getFullYear();
-  return now.getMonth() >= 8 ? seasonKeyFromStart(y) : seasonKeyFromStart(y - 1);
-}
 function fmtDate(iso) {
   if (!iso) return null;
   try {
@@ -382,8 +377,7 @@ export default function App() {
   const [nameFlash, setNameFlash] = useState(false);
   const nameRef = useRef(null);
 
-  // Adhésions : saisie manuelle, saison indépendante de celle de la Frise.
-  const [membSeasonKey, setMembSeasonKey] = useState(currentSeasonKey);
+  // Adhésions : saisie manuelle, sur la même saison globale que la Frise.
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
@@ -391,7 +385,12 @@ export default function App() {
   const [membModal, setMembModal] = useState(null);
   const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", tendido: [], practicos: [] });
 
-  const months = useMemo(() => buildMonths(meta.startYear, meta.startMonth), [meta]);
+  // Le début de saison est fixé en septembre partout dans l'app (Frise et
+  // Adhésions partagent la même notion de saison) : startMonth n'est plus
+  // une donnée réglable, on l'ignore volontairement même si meta en garde
+  // une trace côté base pour compatibilité.
+  const months = useMemo(() => buildMonths(meta.startYear, 8), [meta.startYear]);
+  const globalSeasonKey = useMemo(() => seasonKeyFromStart(meta.startYear), [meta.startYear]);
   const catById = useMemo(() => {
     const m = {};
     categories.forEach((c) => (m[c.id] = c));
@@ -466,8 +465,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (authState === "ok" && view === "adhesions") loadMembers(membSeasonKey);
-  }, [authState, view, membSeasonKey, loadMembers]);
+    if (authState === "ok" && view === "adhesions") loadMembers(globalSeasonKey);
+  }, [authState, view, globalSeasonKey, loadMembers]);
 
   useEffect(() => {
     if (authState === "ok" && view === "adhesions") {
@@ -631,12 +630,10 @@ export default function App() {
     }
   };
 
-  const changeMembSeason = (delta) => setMembSeasonKey((k) => seasonKeyFromStart(seasonStartYear(k) + delta));
-
   const openAddMember = () => {
     setMembModal({
       mode: "add",
-      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: membSeasonKey, joinedDate: "" },
+      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: globalSeasonKey, joinedDate: "" },
     });
   };
   const openEditMember = (m) => setMembModal({ mode: "edit", draft: { ...m } });
@@ -650,14 +647,14 @@ export default function App() {
           id: d.id, firstName: d.firstName.trim(), lastName: d.lastName.trim(),
           type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
-        if (created.seasonKey === membSeasonKey) setMembers((list) => [...list, created]);
+        if (created.seasonKey === globalSeasonKey) setMembers((list) => [...list, created]);
       } else {
         const updated = await api.updateMembership(d.id, {
           firstName: d.firstName.trim(), lastName: d.lastName.trim(),
           type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
         setMembers((list) => {
-          if (updated.seasonKey !== membSeasonKey) return list.filter((m) => m.id !== updated.id);
+          if (updated.seasonKey !== globalSeasonKey) return list.filter((m) => m.id !== updated.id);
           return list.map((m) => (m.id === updated.id ? updated : m));
         });
       }
@@ -789,18 +786,13 @@ export default function App() {
           <span className="cf-kicker">Culturafición · Bureau</span>
           <span className="cf-title">Frise de la <b>saison</b></span>
           <div className="cf-season">
-            <button className="cf-iconbtn" aria-label="Année précédente" onClick={() => persistMeta({ ...meta, startYear: meta.startYear - 1 })}>
+            <button className="cf-iconbtn" aria-label="Année précédente" onClick={() => persistMeta({ startYear: meta.startYear - 1, startMonth: 8 })}>
               <ChevronLeft size={16} />
             </button>
             <span className="cf-season-lab">Saison {seasonLabel(months)}</span>
-            <button className="cf-iconbtn" aria-label="Année suivante" onClick={() => persistMeta({ ...meta, startYear: meta.startYear + 1 })}>
+            <button className="cf-iconbtn" aria-label="Année suivante" onClick={() => persistMeta({ startYear: meta.startYear + 1, startMonth: 8 })}>
               <ChevronRight size={16} />
             </button>
-            <select className="cf-select" style={{ width: "auto", padding: "5px 8px", marginLeft: 6 }}
-              value={meta.startMonth} onChange={(e) => persistMeta({ ...meta, startMonth: Number(e.target.value) })}
-              aria-label="Mois de départ de la saison">
-              {MONTHS_LONG.map((m, i) => <option key={i} value={i}>débute en {m}</option>)}
-            </select>
           </div>
         </div>
         <div className="cf-viewtoggle">
@@ -823,7 +815,7 @@ export default function App() {
           <input id="cf-name" ref={nameRef} value={me} placeholder="votre prénom" onChange={(e) => saveMe(e.target.value)} />
         </div>
         <button className="cf-btn cf-btn-ghost"
-          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(membSeasonKey); loadMembSummary(); loadNonRenewed(); } }}
+          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); } }}
           title="Récupérer les ajouts des autres membres">
           <RefreshCw size={15} /> Rafraîchir
         </button>
@@ -1085,15 +1077,7 @@ export default function App() {
       {view === "adhesions" && (
         <div className="cf-home">
           <div className="cf-controls">
-            <div className="cf-season" style={{ marginTop: 0 }}>
-              <button className="cf-iconbtn" aria-label="Saison précédente" onClick={() => changeMembSeason(-1)}>
-                <ChevronLeft size={16} />
-              </button>
-              <span className="cf-season-lab">Saison {membSeasonKey}</span>
-              <button className="cf-iconbtn" aria-label="Saison suivante" onClick={() => changeMembSeason(1)}>
-                <ChevronRight size={16} />
-              </button>
-            </div>
+            <span className="cf-season-lab">Saison {globalSeasonKey}</span>
             <div className="cf-spacer" />
             <button className="cf-btn cf-btn-primary" onClick={openAddMember}>
               <Plus size={17} /> Ajouter un adhérent
@@ -1123,8 +1107,8 @@ export default function App() {
             </div>
           ) : members.length === 0 ? (
             <div className="cf-empty" style={{ flex: "none" }}>
-              <b>Aucun adhérent pour {membSeasonKey}</b>
-              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison pour en consulter une autre.</span>
+              <b>Aucun adhérent pour {globalSeasonKey}</b>
+              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison depuis le sélecteur en haut de page.</span>
               <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={openAddMember}>
                 <Plus size={16} /> Premier adhérent
               </button>
@@ -1132,7 +1116,7 @@ export default function App() {
           ) : (
             <>
               <span className="cf-search-count">
-                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {membSeasonKey}
+                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {globalSeasonKey}
               </span>
               <div className="cf-memb-list">
                 {members.map((m) => {

@@ -26,6 +26,11 @@ const DEFAULT_CATS = [
 
 const NEW_CAT_COLORS = ["#9E5BA8", "#C77F1A", "#5E7D8A", "#A23E5C", "#3F6E55", "#7A6FB0"];
 
+const MEMBERSHIP_TYPES = {
+  tendido:   { label: "Tendido",   color: "#BB322C" },
+  practicos: { label: "Prácticos", color: "#B8862E" },
+};
+
 const STATUSES = {
   idee:        { label: "Idée",        op: 0.38 },
   a_confirmer: { label: "À confirmer", op: 0.68 },
@@ -53,6 +58,17 @@ function buildMonths(startYear, startMonth) {
 function seasonLabel(months) {
   const a = months[0].y, b = months[11].y;
   return a === b ? `${a}` : `${a}–${b}`;
+}
+function seasonStartYear(seasonKey) {
+  return Number(String(seasonKey).split("-")[0]);
+}
+function seasonKeyFromStart(y) {
+  return `${y}-${y + 1}`;
+}
+function currentSeasonKey() {
+  const now = new Date();
+  const y = now.getFullYear();
+  return now.getMonth() >= 8 ? seasonKeyFromStart(y) : seasonKeyFromStart(y - 1);
 }
 function fmtDate(iso) {
   if (!iso) return null;
@@ -287,6 +303,24 @@ html, body{
 .cf-loading .spin{animation:cf-spin 1s linear infinite}
 @keyframes cf-spin{to{transform:rotate(360deg)}}
 
+.cf-memb-list{display:flex;flex-direction:column;gap:8px}
+.cf-memb-row{display:flex;align-items:center;gap:12px;background:var(--blanco);border:1px solid rgba(26,20,19,.12);
+  border-radius:11px;padding:10px 14px}
+.cf-memb-type{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;
+  border-radius:999px;color:#fff;flex:none}
+.cf-memb-name{font-size:14px;font-weight:600;flex:1 1 auto;min-width:0}
+.cf-memb-date{font-size:12px;color:#7a6f63;white-space:nowrap}
+.cf-memb-actions{display:flex;gap:3px;flex:none}
+
+.cf-hist-legend{display:flex;gap:16px;align-items:center;font-size:12px;font-weight:600;color:#6b6258;margin:2px 0 6px}
+.cf-hist-legend .dot{width:9px;height:9px;border-radius:3px;margin-right:6px}
+.cf-hist{display:flex;gap:20px;align-items:flex-end;overflow-x:auto;padding:8px 4px 6px;min-height:160px}
+.cf-hist-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex:0 0 60px}
+.cf-hist-bars{display:flex;align-items:flex-end;gap:4px;height:120px}
+.cf-hist-bar{width:18px;border-radius:4px 4px 0 0;min-height:2px;transition:.2s}
+.cf-hist-label{font-size:11px;font-weight:700;color:var(--tinta);white-space:nowrap}
+.cf-hist-values{font-size:10.5px;color:#7a6f63;white-space:nowrap}
+
 @media (max-width:640px){
   .cf-frise{flex-direction:column;overflow-x:visible}
   .cf-month{flex:1 1 auto}
@@ -294,6 +328,7 @@ html, body{
   .cf-statusfilter{margin-left:0}
   .cf-search-card{flex-direction:column;align-items:flex-start}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
+  .cf-memb-row{flex-wrap:wrap}
 }
 @media (prefers-reduced-motion:reduce){.cf-root *{transition:none!important;animation:none!important}}
 .cf-root :focus-visible{outline:2px solid var(--sangre);outline-offset:2px;border-radius:6px}
@@ -335,6 +370,14 @@ export default function App() {
   const [nameFlash, setNameFlash] = useState(false);
   const nameRef = useRef(null);
 
+  // Adhésions : saisie manuelle, saison indépendante de celle de la Frise.
+  const [membSeasonKey, setMembSeasonKey] = useState(currentSeasonKey);
+  const [members, setMembers] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState("");
+  const [membSummary, setMembSummary] = useState([]);
+  const [membModal, setMembModal] = useState(null);
+
   const months = useMemo(() => buildMonths(meta.startYear, meta.startMonth), [meta]);
   const catById = useMemo(() => {
     const m = {};
@@ -372,6 +415,41 @@ export default function App() {
       }
     })();
   }, [loadState]);
+
+  const loadMembers = useCallback(async (season) => {
+    setMembersError("");
+    setMembersLoading(true);
+    try {
+      const list = await api.listMemberships(season);
+      setMembers(list || []);
+    } catch (e) {
+      if (e.unauthorized) {
+        clearCode();
+        setAuthState("needed");
+      } else {
+        setMembersError("Impossible de charger les adhérents. Vérifiez votre connexion et réessayez.");
+      }
+    } finally {
+      setMembersLoading(false);
+    }
+  }, []);
+
+  const loadMembSummary = useCallback(async () => {
+    try {
+      const data = await api.getMembershipsSummary();
+      setMembSummary(data || []);
+    } catch {
+      /* l'historique reste tel quel si la requête échoue */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authState === "ok" && view === "adhesions") loadMembers(membSeasonKey);
+  }, [authState, view, membSeasonKey, loadMembers]);
+
+  useEffect(() => {
+    if (authState === "ok" && view === "adhesions") loadMembSummary();
+  }, [authState, view, loadMembSummary]);
 
   const submitCode = async (e) => {
     e.preventDefault();
@@ -528,6 +606,61 @@ export default function App() {
     }
   };
 
+  const changeMembSeason = (delta) => setMembSeasonKey((k) => seasonKeyFromStart(seasonStartYear(k) + delta));
+
+  const openAddMember = () => {
+    setMembModal({
+      mode: "add",
+      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: membSeasonKey, joinedDate: "" },
+    });
+  };
+  const openEditMember = (m) => setMembModal({ mode: "edit", draft: { ...m } });
+
+  const submitMembModal = async () => {
+    const d = membModal.draft;
+    if (!d.firstName.trim() || !d.lastName.trim()) return;
+    try {
+      if (membModal.mode === "add") {
+        const created = await api.createMembership({
+          id: d.id, firstName: d.firstName.trim(), lastName: d.lastName.trim(),
+          type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
+        });
+        if (created.seasonKey === membSeasonKey) setMembers((list) => [...list, created]);
+      } else {
+        const updated = await api.updateMembership(d.id, {
+          firstName: d.firstName.trim(), lastName: d.lastName.trim(),
+          type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
+        });
+        setMembers((list) => {
+          if (updated.seasonKey !== membSeasonKey) return list.filter((m) => m.id !== updated.id);
+          return list.map((m) => (m.id === updated.id ? updated : m));
+        });
+      }
+      setMembModal(null);
+      loadMembSummary();
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    }
+  };
+
+  const removeMember = async (id) => {
+    try {
+      await api.deleteMembership(id);
+      setMembers((list) => list.filter((m) => m.id !== id));
+      loadMembSummary();
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    }
+  };
+
+  const membTotals = useMemo(() => {
+    const tendido = members.filter((m) => m.type === "tendido").length;
+    const practicos = members.filter((m) => m.type === "practicos").length;
+    return { tendido, practicos, total: tendido + practicos };
+  }, [members]);
+
+  const membHistMax = Math.max(1, ...membSummary.flatMap((s) => [s.tendido, s.practicos]));
+
   const persistMeta = async (next) => {
     setMeta(next);
     try { await api.updateMeta(next); } catch (e) { alert("Erreur : " + e.message); }
@@ -653,18 +786,25 @@ export default function App() {
           <button className="cf-vt" aria-pressed={view === "frise"} onClick={() => setView("frise")}>
             <CalendarDays size={14} /> Frise
           </button>
+          <button className="cf-vt" aria-pressed={view === "adhesions"} onClick={() => setView("adhesions")}>
+            <Users size={14} /> Adhésions
+          </button>
         </div>
         <div className="cf-spacer" />
         <div className={"cf-me" + (nameFlash ? " flash" : "")}>
           <label htmlFor="cf-name">Vous êtes</label>
           <input id="cf-name" ref={nameRef} value={me} placeholder="votre prénom" onChange={(e) => saveMe(e.target.value)} />
         </div>
-        <button className="cf-btn cf-btn-ghost" onClick={loadState} title="Récupérer les ajouts des autres membres">
+        <button className="cf-btn cf-btn-ghost"
+          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(membSeasonKey); loadMembSummary(); } }}
+          title="Récupérer les ajouts des autres membres">
           <RefreshCw size={15} /> Rafraîchir
         </button>
-        <button className="cf-btn cf-btn-primary" onClick={() => openAdd()}>
-          <Plus size={17} /> Ajouter un événement
-        </button>
+        {view !== "adhesions" && (
+          <button className="cf-btn cf-btn-primary" onClick={() => openAdd()}>
+            <Plus size={17} /> Ajouter un événement
+          </button>
+        )}
       </div>
 
       <div className="cf-rule" />
@@ -913,6 +1053,180 @@ export default function App() {
         <span style={{ marginLeft: "auto", fontStyle: "italic" }}>Événements et catégories sont partagés entre les membres du bureau.</span>
       </div>
       </>
+      )}
+
+      {view === "adhesions" && (
+        <div className="cf-home">
+          <div className="cf-controls">
+            <div className="cf-season" style={{ marginTop: 0 }}>
+              <button className="cf-iconbtn" aria-label="Saison précédente" onClick={() => changeMembSeason(-1)}>
+                <ChevronLeft size={16} />
+              </button>
+              <span className="cf-season-lab">Saison {membSeasonKey}</span>
+              <button className="cf-iconbtn" aria-label="Saison suivante" onClick={() => changeMembSeason(1)}>
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <div className="cf-spacer" />
+            <button className="cf-btn cf-btn-primary" onClick={openAddMember}>
+              <Plus size={17} /> Ajouter un adhérent
+            </button>
+          </div>
+
+          {membersError && <div className="cf-note error">{membersError}</div>}
+
+          <div className="cf-stats" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="cf-stat">
+              <span><Users size={13} /> Tendidos</span>
+              <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: ".02em" }}>{membTotals.tendido}</span>
+            </div>
+            <div className="cf-stat">
+              <span><Users size={13} /> Prácticos</span>
+              <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: ".02em" }}>{membTotals.practicos}</span>
+            </div>
+            <div className="cf-stat net">
+              <span><Users size={13} /> Total de la saison</span>
+              <span className="val">{membTotals.total}</span>
+            </div>
+          </div>
+
+          {membersLoading ? (
+            <div className="cf-loading" style={{ minHeight: "auto", padding: "26px 0" }}>
+              <Loader2 size={22} className="spin" /> <span>Chargement…</span>
+            </div>
+          ) : members.length === 0 ? (
+            <div className="cf-empty" style={{ flex: "none" }}>
+              <b>Aucun adhérent pour {membSeasonKey}</b>
+              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison pour en consulter une autre.</span>
+              <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={openAddMember}>
+                <Plus size={16} /> Premier adhérent
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className="cf-search-count">
+                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {membSeasonKey}
+              </span>
+              <div className="cf-memb-list">
+                {members.map((m) => {
+                  const t = MEMBERSHIP_TYPES[m.type] || NEUTRAL;
+                  const when = fmtDate(m.joinedDate);
+                  return (
+                    <div className="cf-memb-row" key={m.id}>
+                      <span className="cf-memb-type" style={{ background: t.color }}>{t.label}</span>
+                      <span className="cf-memb-name">{m.firstName} {m.lastName}</span>
+                      <span className="cf-memb-date">{when || (m.joinedDate ? m.joinedDate : "—")}</span>
+                      <div className="cf-memb-actions">
+                        <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
+                        <button className="cf-act" aria-label="Supprimer" onClick={() => removeMember(m.id)}><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <div className="cf-rule" />
+          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>
+          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Évolution des effectifs, saison par saison</h3>
+          {membSummary.length === 0 ? (
+            <div className="cf-empty" style={{ flex: "none" }}>
+              <span>L'historique apparaîtra dès qu'une saison aura au moins un adhérent enregistré.</span>
+            </div>
+          ) : (
+            <>
+              <div className="cf-hist-legend">
+                <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.tendido.color, display: "inline-block" }} />Tendido</span>
+                <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.practicos.color, display: "inline-block" }} />Prácticos</span>
+              </div>
+              <div className="cf-hist">
+                {membSummary.map((s) => (
+                  <div className="cf-hist-col" key={s.season}>
+                    <div className="cf-hist-bars">
+                      <div className="cf-hist-bar" style={{ height: `${(s.tendido / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.tendido.color }}
+                        title={`Tendido : ${s.tendido}`} />
+                      <div className="cf-hist-bar" style={{ height: `${(s.practicos / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.practicos.color }}
+                        title={`Prácticos : ${s.practicos}`} />
+                    </div>
+                    <span className="cf-hist-label">{s.season}</span>
+                    <span className="cf-hist-values">{s.tendido} / {s.practicos}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* membership modal */}
+      {membModal && (
+        <div className="cf-scrim" onMouseDown={(e) => e.target === e.currentTarget && setMembModal(null)}>
+          <div className="cf-modal" role="dialog" aria-modal="true">
+            <div className="cf-modal-head">
+              <h3>{membModal.mode === "add" ? "Nouvel adhérent" : "Modifier l'adhérent"}</h3>
+              <button className="cf-iconbtn" aria-label="Fermer" onClick={() => setMembModal(null)}><X size={16} /></button>
+            </div>
+            <div className="cf-modal-body">
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Prénom</span>
+                  <input className="cf-input" autoFocus value={membModal.draft.firstName}
+                    onChange={(e) => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, firstName: e.target.value } }))}
+                    onKeyDown={(e) => e.key === "Enter" && submitMembModal()} />
+                </label>
+                <label className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Nom</span>
+                  <input className="cf-input" value={membModal.draft.lastName}
+                    onChange={(e) => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, lastName: e.target.value } }))}
+                    onKeyDown={(e) => e.key === "Enter" && submitMembModal()} />
+                </label>
+              </div>
+              <div className="cf-field">
+                <span>Type d'adhésion</span>
+                <div className="cf-pickrow">
+                  {Object.entries(MEMBERSHIP_TYPES).map(([key, t]) => (
+                    <button key={key} className="cf-pick" aria-pressed={membModal.draft.type === key}
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, type: key } }))}>
+                      <span className="dot" style={{ background: t.color }} />
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Date d'adhésion (facultatif)</span>
+                  <input type="date" className="cf-input" value={membModal.draft.joinedDate || ""}
+                    onChange={(e) => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, joinedDate: e.target.value } }))} />
+                </label>
+                <div className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Saison</span>
+                  <div className="cf-season" style={{ marginTop: 2 }}>
+                    <button type="button" className="cf-iconbtn" aria-label="Saison précédente"
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, seasonKey: seasonKeyFromStart(seasonStartYear(mm.draft.seasonKey) - 1) } }))}>
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="cf-season-lab">{membModal.draft.seasonKey}</span>
+                    <button type="button" className="cf-iconbtn" aria-label="Saison suivante"
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, seasonKey: seasonKeyFromStart(seasonStartYear(mm.draft.seasonKey) + 1) } }))}>
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {(!membModal.draft.firstName.trim() || !membModal.draft.lastName.trim()) && (
+                <span className="cf-hint">Renseignez le prénom et le nom pour enregistrer.</span>
+              )}
+            </div>
+            <div className="cf-modal-foot">
+              <button className="cf-btn cf-btn-ghost" onClick={() => setMembModal(null)}>Annuler</button>
+              <button className="cf-btn cf-btn-primary" onClick={submitMembModal}>
+                <Check size={16} /> {membModal.mode === "add" ? "Ajouter" : "Enregistrer"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* event modal */}

@@ -83,4 +83,10 @@ export const api = {
   updateMeta: (patch) => request("/api/meta", { method: "PUT", body: patch }),
 
   getHelloAsso: (formSlug) => request(`/api/helloasso/${encodeURIComponent(formSlug)}`),
+
+  listMemberships: (season) => request(`/api/memberships?season=${encodeURIComponent(season)}`),
+  createMembership: (m) => request("/api/memberships", { method: "POST", body: m }),
+  updateMembership: (id, patch) => request(`/api/memberships/${id}`, { method: "PUT", body: patch }),
+  deleteMembership: (id) => request(`/api/memberships/${id}`, { method: "DELETE" }),
+  getMembershipsSummary: () => request("/api/memberships/summary"),
 };

@@ -22,6 +22,18 @@ export function rowToCategory(row) {
   return { id: row.id, label: row.label, color: row.color, position: row.position };
 }
 
+export function rowToMembership(row) {
+  return {
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    type: row.type,
+    seasonKey: row.season_key,
+    joinedDate: row.joined_date,
+    createdAt: row.created_at,
+  };
+}
+
 function safeParseArray(raw) {
   if (!raw) return [];
   try {

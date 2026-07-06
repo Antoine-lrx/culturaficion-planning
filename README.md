@@ -5,11 +5,13 @@ tentaderos prácticos, retransmissions, assemblée générale…), sous forme de
 frise sur 12 mois. Interface « cartel taurin » (rouge, sable, or, encre),
 partagée entre les membres du bureau via un code d'accès unique.
 
-Trois vues, accessibles via les boutons en haut de page :
+Quatre vues, accessibles via les boutons en haut de page :
 - **Accueil** — recherche rapide, centrée, avec suggestions en direct ;
   cliquer sur une suggestion ouvre directement la fiche de l'événement.
 - **Liste** — tous les événements, filtrables par nom, catégorie et statut.
 - **Frise** — le planning sur 12 mois (vue historique, inchangée).
+- **Adhésions** — saisie manuelle des adhérents (tendido / prácticos) saison
+  par saison, avec totaux et historique comparatif (voir section 7).
 
 Pas de vrai routeur d'URL — juste une bascule d'état côté client, plus
 simple et plus robuste sur de l'hébergement statique. Les trois vues
@@ -220,6 +222,8 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   `registered`, `revenue`, `expenses`, `created_at`.
 - `categories` : `id`, `label`, `color`, `position`.
 - `meta` : `key` / `value` (utilisé pour `startYear` et `startMonth`).
+- `memberships` : `id`, `first_name`, `last_name`, `type` (`tendido` ou
+  `practicos`), `season_key`, `joined_date`, `created_at` (voir section 7).
 
 Voir `migrations/0001_init.sql` pour le détail et les catégories par défaut.
 
@@ -303,4 +307,43 @@ test ayant déjà une billetterie active :
 
 ```
 npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0003_add_helloasso_slug.sql
+```
+
+---
+
+## 7. Page Adhésions (saisie manuelle)
+
+Le bureau gère les adhésions via Yapla, sans API disponible pour les
+récupérer automatiquement. Cette page permet donc de **saisir les
+adhésions à la main**, pour suivre leur évolution saison après saison.
+
+- Deux types d'adhésion : **tendido** et **prácticos**. Une personne prenant
+  les deux apparaît comme deux adhérents distincts (une ligne par type).
+- Une **saison** va de septembre à août (ex. `2025-2026`), réglable
+  librement dans cette page — indépendamment de la saison affichée dans la
+  Frise (`meta.startYear` / `meta.startMonth`), pour permettre une saisie
+  rétroactive sur une saison passée sans toucher au planning affiché.
+- Champs saisis : prénom, nom, type, saison, date d'adhésion (facultative).
+  Aucune autre donnée (pas d'email, téléphone, adresse, statut de
+  paiement) : seules les données nécessaires à la gestion administrative de
+  l'association sont conservées (RGPD, minimisation des données).
+- La suppression d'un adhérent est immédiate, sans étape supplémentaire.
+- Les données restent dans la même base D1 `culturaficion_planning`, déjà
+  en juridiction UE — aucune infrastructure supplémentaire.
+
+### Endpoints
+
+- `GET /api/memberships?season=2025-2026` — liste des adhérents de la saison.
+- `POST /api/memberships` — ajoute un adhérent.
+- `PUT /api/memberships/:id` — modifie un adhérent.
+- `DELETE /api/memberships/:id` — supprime un adhérent.
+- `GET /api/memberships/summary` — totaux `tendido` / `practicos` pour
+  chaque saison présente en base (alimente l'historique comparatif).
+
+Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
+
+### Migration à appliquer
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0004_add_memberships.sql
 ```

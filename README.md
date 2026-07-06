@@ -339,6 +339,9 @@ adhésions à la main**, pour suivre leur évolution saison après saison.
 - `DELETE /api/memberships/:id` — supprime un adhérent.
 - `GET /api/memberships/summary` — totaux `tendido` / `practicos` pour
   chaque saison présente en base (alimente l'historique comparatif).
+- `GET /api/memberships/non-renewed` — pour chaque type, les adhérents
+  ayant eu ce type une saison passée mais aucune adhésion (tout type
+  confondu) pour la saison en cours ; alimente la section « À relancer ».
 
 Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 
@@ -347,3 +350,21 @@ Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 ```
 npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0004_add_memberships.sql
 ```
+
+### Section « À relancer » (adhérents non renouvelés)
+
+Sous la liste et les totaux de la page Adhésions, une section calcule
+automatiquement, pour chaque type, les adhérents qui avaient ce type une
+saison passée mais n'ont repris **aucune** adhésion (tendido ou prácticos)
+pour la saison en cours. Dès qu'une personne reprend une cotisation —
+même dans l'autre type — elle sort de toutes les listes.
+
+La saison en cours est calculée automatiquement côté serveur à partir de
+la date du jour (pas de réglage manuel). Le rapprochement d'une saison à
+l'autre se fait par prénom + nom (insensible à la casse, espaces
+superflus ignorés) : la table `memberships` n'ayant pas d'identifiant
+unique par personne, un nom saisi différemment d'une année sur l'autre ne
+sera pas rapproché correctement — limite connue et acceptée.
+
+Aucune migration supplémentaire : cette section ne fait que croiser les
+données déjà en base.

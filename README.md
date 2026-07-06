@@ -221,7 +221,9 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   `helloasso_slug`, `status`, `proposed_by`, `voters` (JSON), `notes`,
   `registered`, `revenue`, `expenses`, `created_at`.
 - `categories` : `id`, `label`, `color`, `position`.
-- `meta` : `key` / `value` (utilisé pour `startYear` et `startMonth`).
+- `meta` : `key` / `value` (utilisé pour `startYear` — seul réglage encore
+  modifiable — et `startMonth`, conservé pour compatibilité mais toujours
+  fixé à `8`/septembre par le code, plus réglable depuis l'interface).
 - `memberships` : `id`, `first_name`, `last_name`, `type` (`tendido` ou
   `practicos`), `season_key`, `joined_date`, `created_at` (voir section 7).
 
@@ -319,10 +321,14 @@ adhésions à la main**, pour suivre leur évolution saison après saison.
 
 - Deux types d'adhésion : **tendido** et **prácticos**. Une personne prenant
   les deux apparaît comme deux adhérents distincts (une ligne par type).
-- Une **saison** va de septembre à août (ex. `2025-2026`), réglable
-  librement dans cette page — indépendamment de la saison affichée dans la
-  Frise (`meta.startYear` / `meta.startMonth`), pour permettre une saisie
-  rétroactive sur une saison passée sans toucher au planning affiché.
+- Une **saison** va de septembre à août (ex. `2025-2026`) — **même sélecteur
+  de saison que la Frise** (flèches précédent/suivant en haut de page) : il
+  n'y a plus qu'un seul point de navigation entre saisons dans toute l'app.
+  Le mois de départ est fixé à septembre partout, non réglable.
+- Le formulaire « Ajouter un adhérent » garde son propre champ **saison**,
+  éditable indépendamment (pré-rempli avec la saison affichée), pour
+  permettre une saisie rétroactive sur une saison passée sans changer la
+  saison affichée dans le reste de l'application.
 - Champs saisis : prénom, nom, type, saison, date d'adhésion (facultative).
   Aucune autre donnée (pas d'email, téléphone, adresse, statut de
   paiement) : seules les données nécessaires à la gestion administrative de
@@ -330,6 +336,18 @@ adhésions à la main**, pour suivre leur évolution saison après saison.
 - La suppression d'un adhérent est immédiate, sans étape supplémentaire.
 - Les données restent dans la même base D1 `culturaficion_planning`, déjà
   en juridiction UE — aucune infrastructure supplémentaire.
+
+### Remise à niveau ponctuelle de `startMonth` (une seule fois)
+
+Si un membre du bureau avait changé le mois de départ de la saison avant
+cette mise à jour, la base peut encore contenir une valeur différente de
+`8`. Elle est ignorée par l'application (le mois de départ est maintenant
+toujours septembre) et se corrige d'elle-même à la prochaine navigation
+entre saisons, mais vous pouvez la remettre à niveau tout de suite avec :
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --command="UPDATE meta SET value = '8' WHERE key = 'startMonth';"
+```
 
 ### Endpoints
 
@@ -339,6 +357,9 @@ adhésions à la main**, pour suivre leur évolution saison après saison.
 - `DELETE /api/memberships/:id` — supprime un adhérent.
 - `GET /api/memberships/summary` — totaux `tendido` / `practicos` pour
   chaque saison présente en base (alimente l'historique comparatif).
+- `GET /api/memberships/non-renewed` — pour chaque type, les adhérents
+  ayant eu ce type une saison passée mais aucune adhésion (tout type
+  confondu) pour la saison en cours ; alimente la section « À relancer ».
 
 Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 
@@ -347,3 +368,21 @@ Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 ```
 npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0004_add_memberships.sql
 ```
+
+### Section « À relancer » (adhérents non renouvelés)
+
+Sous la liste et les totaux de la page Adhésions, une section calcule
+automatiquement, pour chaque type, les adhérents qui avaient ce type une
+saison passée mais n'ont repris **aucune** adhésion (tendido ou prácticos)
+pour la saison en cours. Dès qu'une personne reprend une cotisation —
+même dans l'autre type — elle sort de toutes les listes.
+
+La saison en cours est calculée automatiquement côté serveur à partir de
+la date du jour (pas de réglage manuel). Le rapprochement d'une saison à
+l'autre se fait par prénom + nom (insensible à la casse, espaces
+superflus ignorés) : la table `memberships` n'ayant pas d'identifiant
+unique par personne, un nom saisi différemment d'une année sur l'autre ne
+sera pas rapproché correctement — limite connue et acceptée.
+
+Aucune migration supplémentaire : cette section ne fait que croiser les
+données déjà en base.

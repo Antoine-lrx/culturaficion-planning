@@ -89,4 +89,5 @@ export const api = {
   updateMembership: (id, patch) => request(`/api/memberships/${id}`, { method: "PUT", body: patch }),
   deleteMembership: (id) => request(`/api/memberships/${id}`, { method: "DELETE" }),
   getMembershipsSummary: () => request("/api/memberships/summary"),
+  getNonRenewed: () => request("/api/memberships/non-renewed"),
 };

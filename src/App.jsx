@@ -65,11 +65,6 @@ function seasonStartYear(seasonKey) {
 function seasonKeyFromStart(y) {
   return `${y}-${y + 1}`;
 }
-function currentSeasonKey() {
-  const now = new Date();
-  const y = now.getFullYear();
-  return now.getMonth() >= 8 ? seasonKeyFromStart(y) : seasonKeyFromStart(y - 1);
-}
 function fmtDate(iso) {
   if (!iso) return null;
   try {
@@ -321,6 +316,18 @@ html, body{
 .cf-hist-label{font-size:11px;font-weight:700;color:var(--tinta);white-space:nowrap}
 .cf-hist-values{font-size:10.5px;color:#7a6f63;white-space:nowrap}
 
+.cf-nr-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
+.cf-nr-col{display:flex;flex-direction:column;gap:8px}
+.cf-nr-head{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--tinta)}
+.cf-nr-head .dot{width:9px;height:9px;border-radius:3px}
+.cf-nr-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  background:rgba(184,134,46,.08);border:1px solid rgba(184,134,46,.35);border-left:3px solid var(--oro);
+  border-radius:10px;padding:9px 12px}
+.cf-nr-lastseason{font-size:11.5px;color:#8a7550;font-weight:600;white-space:nowrap}
+.cf-nr-empty{font-size:12.5px;color:#7a6f63;border:1px dashed rgba(26,20,19,.2);border-radius:10px;padding:12px;text-align:center}
+@media (max-width:640px){.cf-nr-grid{grid-template-columns:1fr}}
+
 @media (max-width:640px){
   .cf-frise{flex-direction:column;overflow-x:visible}
   .cf-month{flex:1 1 auto}
@@ -370,15 +377,20 @@ export default function App() {
   const [nameFlash, setNameFlash] = useState(false);
   const nameRef = useRef(null);
 
-  // Adhésions : saisie manuelle, saison indépendante de celle de la Frise.
-  const [membSeasonKey, setMembSeasonKey] = useState(currentSeasonKey);
+  // Adhésions : saisie manuelle, sur la même saison globale que la Frise.
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
   const [membSummary, setMembSummary] = useState([]);
   const [membModal, setMembModal] = useState(null);
+  const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", tendido: [], practicos: [] });
 
-  const months = useMemo(() => buildMonths(meta.startYear, meta.startMonth), [meta]);
+  // Le début de saison est fixé en septembre partout dans l'app (Frise et
+  // Adhésions partagent la même notion de saison) : startMonth n'est plus
+  // une donnée réglable, on l'ignore volontairement même si meta en garde
+  // une trace côté base pour compatibilité.
+  const months = useMemo(() => buildMonths(meta.startYear, 8), [meta.startYear]);
+  const globalSeasonKey = useMemo(() => seasonKeyFromStart(meta.startYear), [meta.startYear]);
   const catById = useMemo(() => {
     const m = {};
     categories.forEach((c) => (m[c.id] = c));
@@ -443,13 +455,25 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    if (authState === "ok" && view === "adhesions") loadMembers(membSeasonKey);
-  }, [authState, view, membSeasonKey, loadMembers]);
+  const loadNonRenewed = useCallback(async () => {
+    try {
+      const data = await api.getNonRenewed();
+      setNonRenewed(data || { currentSeason: "", tendido: [], practicos: [] });
+    } catch {
+      /* la liste « À relancer » reste telle quelle si la requête échoue */
+    }
+  }, []);
 
   useEffect(() => {
-    if (authState === "ok" && view === "adhesions") loadMembSummary();
-  }, [authState, view, loadMembSummary]);
+    if (authState === "ok" && view === "adhesions") loadMembers(globalSeasonKey);
+  }, [authState, view, globalSeasonKey, loadMembers]);
+
+  useEffect(() => {
+    if (authState === "ok" && view === "adhesions") {
+      loadMembSummary();
+      loadNonRenewed();
+    }
+  }, [authState, view, loadMembSummary, loadNonRenewed]);
 
   const submitCode = async (e) => {
     e.preventDefault();
@@ -606,12 +630,10 @@ export default function App() {
     }
   };
 
-  const changeMembSeason = (delta) => setMembSeasonKey((k) => seasonKeyFromStart(seasonStartYear(k) + delta));
-
   const openAddMember = () => {
     setMembModal({
       mode: "add",
-      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: membSeasonKey, joinedDate: "" },
+      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: globalSeasonKey, joinedDate: "" },
     });
   };
   const openEditMember = (m) => setMembModal({ mode: "edit", draft: { ...m } });
@@ -625,19 +647,20 @@ export default function App() {
           id: d.id, firstName: d.firstName.trim(), lastName: d.lastName.trim(),
           type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
-        if (created.seasonKey === membSeasonKey) setMembers((list) => [...list, created]);
+        if (created.seasonKey === globalSeasonKey) setMembers((list) => [...list, created]);
       } else {
         const updated = await api.updateMembership(d.id, {
           firstName: d.firstName.trim(), lastName: d.lastName.trim(),
           type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
         setMembers((list) => {
-          if (updated.seasonKey !== membSeasonKey) return list.filter((m) => m.id !== updated.id);
+          if (updated.seasonKey !== globalSeasonKey) return list.filter((m) => m.id !== updated.id);
           return list.map((m) => (m.id === updated.id ? updated : m));
         });
       }
       setMembModal(null);
       loadMembSummary();
+      loadNonRenewed();
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -648,6 +671,7 @@ export default function App() {
       await api.deleteMembership(id);
       setMembers((list) => list.filter((m) => m.id !== id));
       loadMembSummary();
+      loadNonRenewed();
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -762,18 +786,13 @@ export default function App() {
           <span className="cf-kicker">Culturafición · Bureau</span>
           <span className="cf-title">Frise de la <b>saison</b></span>
           <div className="cf-season">
-            <button className="cf-iconbtn" aria-label="Année précédente" onClick={() => persistMeta({ ...meta, startYear: meta.startYear - 1 })}>
+            <button className="cf-iconbtn" aria-label="Année précédente" onClick={() => persistMeta({ startYear: meta.startYear - 1, startMonth: 8 })}>
               <ChevronLeft size={16} />
             </button>
             <span className="cf-season-lab">Saison {seasonLabel(months)}</span>
-            <button className="cf-iconbtn" aria-label="Année suivante" onClick={() => persistMeta({ ...meta, startYear: meta.startYear + 1 })}>
+            <button className="cf-iconbtn" aria-label="Année suivante" onClick={() => persistMeta({ startYear: meta.startYear + 1, startMonth: 8 })}>
               <ChevronRight size={16} />
             </button>
-            <select className="cf-select" style={{ width: "auto", padding: "5px 8px", marginLeft: 6 }}
-              value={meta.startMonth} onChange={(e) => persistMeta({ ...meta, startMonth: Number(e.target.value) })}
-              aria-label="Mois de départ de la saison">
-              {MONTHS_LONG.map((m, i) => <option key={i} value={i}>débute en {m}</option>)}
-            </select>
           </div>
         </div>
         <div className="cf-viewtoggle">
@@ -796,7 +815,7 @@ export default function App() {
           <input id="cf-name" ref={nameRef} value={me} placeholder="votre prénom" onChange={(e) => saveMe(e.target.value)} />
         </div>
         <button className="cf-btn cf-btn-ghost"
-          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(membSeasonKey); loadMembSummary(); } }}
+          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); } }}
           title="Récupérer les ajouts des autres membres">
           <RefreshCw size={15} /> Rafraîchir
         </button>
@@ -1058,15 +1077,7 @@ export default function App() {
       {view === "adhesions" && (
         <div className="cf-home">
           <div className="cf-controls">
-            <div className="cf-season" style={{ marginTop: 0 }}>
-              <button className="cf-iconbtn" aria-label="Saison précédente" onClick={() => changeMembSeason(-1)}>
-                <ChevronLeft size={16} />
-              </button>
-              <span className="cf-season-lab">Saison {membSeasonKey}</span>
-              <button className="cf-iconbtn" aria-label="Saison suivante" onClick={() => changeMembSeason(1)}>
-                <ChevronRight size={16} />
-              </button>
-            </div>
+            <span className="cf-season-lab">Saison {globalSeasonKey}</span>
             <div className="cf-spacer" />
             <button className="cf-btn cf-btn-primary" onClick={openAddMember}>
               <Plus size={17} /> Ajouter un adhérent
@@ -1096,8 +1107,8 @@ export default function App() {
             </div>
           ) : members.length === 0 ? (
             <div className="cf-empty" style={{ flex: "none" }}>
-              <b>Aucun adhérent pour {membSeasonKey}</b>
-              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison pour en consulter une autre.</span>
+              <b>Aucun adhérent pour {globalSeasonKey}</b>
+              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison depuis le sélecteur en haut de page.</span>
               <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={openAddMember}>
                 <Plus size={16} /> Premier adhérent
               </button>
@@ -1105,7 +1116,7 @@ export default function App() {
           ) : (
             <>
               <span className="cf-search-count">
-                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {membSeasonKey}
+                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {globalSeasonKey}
               </span>
               <div className="cf-memb-list">
                 {members.map((m) => {
@@ -1126,6 +1137,33 @@ export default function App() {
               </div>
             </>
           )}
+
+          <div className="cf-rule" />
+          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>À relancer</span>
+          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>
+            Non renouvelés{nonRenewed.currentSeason ? ` pour ${nonRenewed.currentSeason}` : ""}
+          </h3>
+          <div className="cf-nr-grid">
+            {["tendido", "practicos"].map((type) => {
+              const t = MEMBERSHIP_TYPES[type];
+              const list = nonRenewed[type] || [];
+              return (
+                <div className="cf-nr-col" key={type}>
+                  <div className="cf-nr-head"><span className="dot" style={{ background: t.color }} />{t.label}</div>
+                  {list.length === 0 ? (
+                    <div className="cf-nr-empty">Tout le monde a renouvelé pour l'instant.</div>
+                  ) : (
+                    list.map((m) => (
+                      <div className="cf-nr-row" key={`${m.first_name}-${m.last_name}`}>
+                        <span className="cf-memb-name">{m.first_name} {m.last_name}</span>
+                        <span className="cf-nr-lastseason">Dernière saison : {m.last_season}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
           <div className="cf-rule" />
           <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>

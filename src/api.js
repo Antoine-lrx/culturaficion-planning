@@ -90,4 +90,18 @@ export const api = {
   deleteMembership: (id) => request(`/api/memberships/${id}`, { method: "DELETE" }),
   getMembershipsSummary: () => request("/api/memberships/summary"),
   getNonRenewed: () => request("/api/memberships/non-renewed"),
+
+  listAccounts: () => request("/api/accounting/accounts"),
+  createAccount: (a) => request("/api/accounting/accounts", { method: "POST", body: a }),
+  updateAccount: (code, patch) => request(`/api/accounting/accounts/${encodeURIComponent(code)}`, { method: "PUT", body: patch }),
+  deleteAccount: (code) => request(`/api/accounting/accounts/${encodeURIComponent(code)}`, { method: "DELETE" }),
+
+  listEntries: (exercise) => request(`/api/accounting/entries?exercise=${encodeURIComponent(exercise)}`),
+  createEntry: (e) => request("/api/accounting/entries", { method: "POST", body: e }),
+  updateEntry: (id, patch) => request(`/api/accounting/entries/${encodeURIComponent(id)}`, { method: "PUT", body: patch }),
+  deleteEntry: (id) => request(`/api/accounting/entries/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  getAcctResult: (exercise) => request(`/api/accounting/result?exercise=${encodeURIComponent(exercise)}`),
+  getAcctBalance: (exercise) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`),
+  updateAcctBalance: (exercise, patch) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`, { method: "PUT", body: patch }),
 };

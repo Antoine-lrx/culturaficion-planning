@@ -5,13 +5,17 @@ tentaderos prácticos, retransmissions, assemblée générale…), sous forme de
 frise sur 12 mois. Interface « cartel taurin » (rouge, sable, or, encre),
 partagée entre les membres du bureau via un code d'accès unique.
 
-Quatre vues, accessibles via les boutons en haut de page :
+Cinq vues, accessibles via les boutons en haut de page :
 - **Accueil** — recherche rapide, centrée, avec suggestions en direct ;
   cliquer sur une suggestion ouvre directement la fiche de l'événement.
 - **Liste** — tous les événements, filtrables par nom, catégorie et statut.
 - **Frise** — le planning sur 12 mois (vue historique, inchangée).
 - **Adhésions** — saisie manuelle des adhérents (tendido / prácticos) saison
   par saison, avec totaux et historique comparatif (voir section 7).
+- **Comptabilité** — journal des recettes/dépenses, compte de résultat et
+  bilan assisté par exercice (septembre → août), avec export PDF/Excel pour
+  l'assemblée générale (voir section 8). **Document de travail : assiste le
+  trésorier, ne le remplace pas.**
 
 Pas de vrai routeur d'URL — juste une bascule d'état côté client, plus
 simple et plus robuste sur de l'hébergement statique. Les trois vues
@@ -226,6 +230,8 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   fixé à `8`/septembre par le code, plus réglable depuis l'interface).
 - `memberships` : `id`, `first_name`, `last_name`, `type` (`tendido` ou
   `practicos`), `season_key`, `joined_date`, `created_at` (voir section 7).
+- `acct_accounts`, `acct_entries`, `acct_balance` : plan de comptes, journal
+  et éléments de bilan du module Comptabilité (voir section 8).
 
 Voir `migrations/0001_init.sql` pour le détail et les catégories par défaut.
 
@@ -386,3 +392,110 @@ sera pas rapproché correctement — limite connue et acceptée.
 
 Aucune migration supplémentaire : cette section ne fait que croiser les
 données déjà en base.
+
+---
+
+## 8. Page Comptabilité (assistée)
+
+Le trésorier tient les comptes selon un **plan comptable associatif**
+(comptes de classe 7 pour les produits, classe 6 pour les charges), sur un
+**exercice de septembre à août** (même sélecteur de saison unique que la
+Frise et les Adhésions).
+
+> **Important** : ce module **assiste** le trésorier, il ne prétend pas
+> produire des comptes certifiés. Chaque écran garde la mention « Document
+> de travail — à valider par le trésorier ». Le trésorier garde la main sur
+> chaque ligne et valide les états avant l'assemblée générale.
+
+### D'où viennent les chiffres
+
+Deux sources bien distinctes :
+
+- **Les événements de la Frise** alimentent **automatiquement** deux
+  comptes : **7061** (somme des recettes des événements de l'exercice) et
+  **61** (somme des dépenses). Un événement appartient à l'exercice via son
+  mois (`month_key`) : l'exercice `2025-2026` couvre septembre 2025 → août
+  2026. Ces deux comptes sont donc **en lecture seule** dans le journal — ils
+  apparaissent détaillés par événement, avec la mention « Depuis la Frise »
+  et un lien vers l'événement ; on ne les modifie qu'en éditant l'événement
+  dans la Frise.
+- **Tout le reste** (cotisations, subventions, dons, ventes, assurances,
+  fournitures, frais bancaires…) se **saisit à la main** dans le journal,
+  rattaché à un poste et à un exercice. La saisie sur un exercice passé est
+  possible (champ exercice éditable dans le formulaire).
+
+### Les 4 sous-vues
+
+1. **Journaux** — liste des opérations (recettes et dépenses), filtrable ;
+   ajout/modification/suppression pour les écritures manuelles, lecture
+   seule pour les lignes issues des événements. Bouton **Postes** pour
+   renommer ou masquer un poste (comme les catégories de la Frise) — masquer
+   ne supprime jamais les écritures déjà saisies.
+2. **Résultat** — compte de résultat calculé automatiquement : produits par
+   poste, charges par poste, sous-totaux, résultat net mis en avant (vert si
+   excédent, rouge si déficit).
+3. **Bilan** — trésorerie de clôture calculée (`trésorerie d'ouverture +
+   recettes − dépenses`), fonds propres reportés + résultat de l'exercice,
+   compléments d'actif/passif saisis à la main, et un contrôle d'équilibre
+   (« Équilibré ✅ » / « Écart de X € ⚠️ », non bloquant). Dans le cas simple
+   d'une compta de trésorerie, `fonds propres reportés = trésorerie
+   d'ouverture` et le bilan s'équilibre naturellement.
+4. **Export** — export du compte de résultat + bilan de l'exercice affiché,
+   en PDF (génération via l'impression du navigateur, mise en page sobre) et
+   en Excel/CSV (aucune bibliothèque tierce, génération 100 % côté client).
+
+### Plan de comptes par défaut (seed)
+
+| Code | Libellé | Alimentation |
+|------|---------|--------------|
+| 7562 | Cotisations adhérents | manuelle |
+| 741 | Subvention d'exploitation | manuelle |
+| 75411 | Dons (sans contrepartie) | manuelle |
+| 7061 | Prestations de services / frais soirées & animations | **auto — Frise** |
+| 7071 | Vente de marchandises | manuelle |
+| 76 | Produits financiers | manuelle |
+| 61 | Règlement prestation soirée & événements | **auto — Frise** |
+| 605 | Autres fournitures | manuelle |
+| 6213 | Rémunérations intermédiaires et honoraires | manuelle |
+| 6161 | Assurances | manuelle |
+| 6238 | Dons et aides à autres associations | manuelle |
+| 60 | Divers (participation aux frais des practicos & éleveurs) | manuelle |
+| 607 | Achat marchandises | manuelle |
+| 6231 | Publicité, publications (banderole/sticker/panuelo) | manuelle |
+| 6247 | Déplacements, missions et réceptions (toreros) | manuelle |
+| 6278 | Services bancaires, autres | manuelle |
+| 64 | Charges de personnel / charges sociales | manuelle |
+| 67 | Charges exceptionnelles | manuelle |
+
+### Endpoints
+
+- `GET /api/accounting/accounts` — liste du plan de comptes.
+- `POST /api/accounting/accounts` — ajoute un poste manuel.
+- `PUT /api/accounting/accounts/:code` — renomme ou masque/démasque un poste.
+- `DELETE /api/accounting/accounts/:code` — supprime un poste manuel non
+  utilisé (refusé pour 7061/61 et pour un poste déjà utilisé par des
+  écritures — masquez-le plutôt).
+- `GET /api/accounting/entries?exercise=2025-2026` — journal complet
+  (écritures manuelles + recettes/dépenses des événements de la Frise).
+- `POST /api/accounting/entries` — ajoute une écriture manuelle.
+- `PUT /api/accounting/entries/:id` / `DELETE /api/accounting/entries/:id` —
+  modifie/supprime une écriture manuelle (les lignes issues d'événements
+  n'existent pas dans cette table et ne peuvent donc pas être touchées ici).
+- `GET /api/accounting/result?exercise=2025-2026` — compte de résultat
+  calculé (total par poste + résultat net).
+- `GET /api/accounting/balance?exercise=2025-2026` /
+  `PUT /api/accounting/balance?exercise=2025-2026` — lit/enregistre les
+  soldes d'ouverture et compléments de bilan de l'exercice.
+
+Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
+
+### Migration à appliquer
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0005_add_accounting.sql
+```
+
+Cette migration crée uniquement les tables `acct_accounts`, `acct_entries`
+et `acct_balance` (avec le plan de comptes ci-dessus déjà inséré) — elle ne
+touche à aucune table existante (`events`, `categories`, `meta`,
+`memberships`).

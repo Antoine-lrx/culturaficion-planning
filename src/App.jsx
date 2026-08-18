@@ -3,6 +3,8 @@ import {
   Plus, Heart, Trash2, Pencil, X, RefreshCw,
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
   Users, Wallet, Scale, Lock, Loader2, Home, Search, MapPin, List,
+  Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
+  ReceiptText, Eye, EyeOff, BookOpen,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 
@@ -328,6 +330,57 @@ html, body{
 .cf-nr-empty{font-size:12.5px;color:#7a6f63;border:1px dashed rgba(26,20,19,.2);border-radius:10px;padding:12px;text-align:center}
 @media (max-width:640px){.cf-nr-grid{grid-template-columns:1fr}}
 
+.cf-acct-eventbadge{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8A5A2E;
+  background:rgba(184,134,46,.14);border:1px solid rgba(184,134,46,.35);border-radius:999px;padding:2px 8px}
+.cf-acct-table{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.cf-acct-section{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.04em;margin:14px 0 4px;
+  color:var(--tinta);display:flex;align-items:center;gap:8px}
+.cf-acct-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
+  background:var(--blanco);border:1px solid rgba(26,20,19,.1);border-radius:9px}
+.cf-acct-row+.cf-acct-row{margin-top:5px}
+.cf-acct-row .code{font-size:11px;font-weight:700;color:#9a8d7c;margin-right:8px}
+.cf-acct-row.auto{border-style:dashed;background:rgba(184,134,46,.06)}
+.cf-acct-row.hidden-acct{opacity:.55}
+.cf-acct-row.total{background:var(--tinta);color:var(--albero);border-color:var(--tinta);font-weight:700;margin-top:8px}
+.cf-acct-row.total .code{color:rgba(247,245,238,.6)}
+.cf-acct-amount.pos{color:#3F7A4E;font-weight:700}
+.cf-acct-amount.neg{color:#BB322C;font-weight:700}
+.cf-acct-row.total .cf-acct-amount.pos,.cf-acct-row.total .cf-acct-amount.neg{color:inherit}
+
+.cf-bilan-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:6px}
+.cf-bilan-col{display:flex;flex-direction:column;gap:6px}
+.cf-bilan-head{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.04em;margin-bottom:2px}
+.cf-bilan-line{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;
+  background:var(--blanco);border:1px solid rgba(26,20,19,.12);border-radius:9px;font-size:13px}
+.cf-bilan-line input.amt{border:0;background:transparent;font-family:inherit;font-weight:700;font-size:13px;
+  text-align:right;width:100px;outline:none;color:var(--tinta)}
+.cf-bilan-manual-row{display:flex;align-items:center;gap:6px}
+.cf-bilan-manual-row input.lab2{flex:1;border:1px solid rgba(26,20,19,.16);border-radius:8px;padding:7px 9px;
+  font-family:inherit;font-size:13px;background:var(--blanco);outline:none}
+.cf-bilan-manual-row input.amt2{width:96px;border:1px solid rgba(26,20,19,.16);border-radius:8px;padding:7px 9px;
+  font-family:inherit;font-size:13px;background:var(--blanco);outline:none;text-align:right}
+.cf-bilan-total{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
+  border-radius:9px;background:var(--tinta);color:var(--albero);font-weight:700;margin-top:4px}
+.cf-balance-check{display:flex;align-items:center;gap:8px;padding:12px 16px;border-radius:12px;font-weight:700;
+  margin-top:14px;font-size:14px}
+.cf-balance-check.ok{background:rgba(63,122,78,.12);color:#2E5B39;border:1px solid rgba(63,122,78,.35)}
+.cf-balance-check.off{background:rgba(187,50,44,.1);color:var(--sangre-deep);border:1px solid rgba(187,50,44,.35)}
+.cf-workdoc{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a7550;
+  background:rgba(184,134,46,.1);border:1px dashed rgba(184,134,46,.4);border-radius:999px;padding:5px 12px;
+  display:inline-flex;align-items:center;gap:6px;margin:6px 0}
+.cf-export-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+.cf-print-sheet{display:none}
+@media print{
+  html,body,.cf-root{min-height:0!important;height:auto!important;background:#fff!important}
+  body *{visibility:hidden}
+  .cf-print-sheet,.cf-print-sheet *{visibility:visible}
+  .cf-print-sheet{display:block;position:absolute;top:0;left:0;width:100%;padding:26px;background:#fff;color:#1A1413}
+  .cf-print-sheet h1,.cf-print-sheet h2{font-family:'Bebas Neue',sans-serif;letter-spacing:.03em}
+  .cf-print-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e4d8c0;font-size:13px}
+  .cf-print-row.total{font-weight:700;border-bottom:2px solid #1A1413}
+}
+@media (max-width:640px){.cf-bilan-grid{grid-template-columns:1fr}}
+
 @media (max-width:640px){
   .cf-frise{flex-direction:column;overflow-x:visible}
   .cf-month{flex:1 1 auto}
@@ -385,6 +438,24 @@ export default function App() {
   const [membModal, setMembModal] = useState(null);
   const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", tendido: [], practicos: [] });
 
+  // Comptabilité : plan de comptes, journal (manuel + événements de la
+  // Frise), compte de résultat calculé et bilan assisté, sur la même
+  // saison/exercice globale que la Frise et les Adhésions.
+  const [acctTab, setAcctTab] = useState("journaux");
+  const [acctAccounts, setAcctAccounts] = useState([]);
+  const [acctEntries, setAcctEntries] = useState([]);
+  const [acctResult, setAcctResult] = useState(null);
+  const [acctBalance, setAcctBalance] = useState(null);
+  const [balanceDraft, setBalanceDraft] = useState(null);
+  const [balanceDirty, setBalanceDirty] = useState(false);
+  const [balanceSaving, setBalanceSaving] = useState(false);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctError, setAcctError] = useState("");
+  const [acctKindFilter, setAcctKindFilter] = useState("all");
+  const [entryModal, setEntryModal] = useState(null);
+  const [acctAccountsModal, setAcctAccountsModal] = useState(false);
+  const [newAcctAccount, setNewAcctAccount] = useState({ code: "", label: "", kind: "produit" });
+
   // Le début de saison est fixé en septembre partout dans l'app (Frise et
   // Adhésions partagent la même notion de saison) : startMonth n'est plus
   // une donnée réglable, on l'ignore volontairement même si meta en garde
@@ -396,6 +467,11 @@ export default function App() {
     categories.forEach((c) => (m[c.id] = c));
     return m;
   }, [categories]);
+  const acctAccountById = useMemo(() => {
+    const m = {};
+    acctAccounts.forEach((a) => (m[a.code] = a));
+    return m;
+  }, [acctAccounts]);
 
   const loadState = useCallback(async () => {
     setLoadError("");
@@ -474,6 +550,211 @@ export default function App() {
       loadNonRenewed();
     }
   }, [authState, view, loadMembSummary, loadNonRenewed]);
+
+  const loadAcctAll = useCallback(async (exercise) => {
+    setAcctError("");
+    setAcctLoading(true);
+    try {
+      const [accounts, entries, result, balance] = await Promise.all([
+        api.listAccounts(),
+        api.listEntries(exercise),
+        api.getAcctResult(exercise),
+        api.getAcctBalance(exercise),
+      ]);
+      setAcctAccounts(accounts || []);
+      setAcctEntries(entries || []);
+      setAcctResult(result || null);
+      setAcctBalance(balance || null);
+      setBalanceDraft(balance || null);
+      setBalanceDirty(false);
+    } catch (e) {
+      if (e.unauthorized) {
+        clearCode();
+        setAuthState("needed");
+      } else {
+        setAcctError("Impossible de charger la comptabilité. Vérifiez votre connexion et réessayez.");
+      }
+    } finally {
+      setAcctLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authState === "ok" && view === "compta") loadAcctAll(globalSeasonKey);
+  }, [authState, view, globalSeasonKey, loadAcctAll]);
+
+  const refreshAcctResult = useCallback(async (exercise) => {
+    try {
+      const result = await api.getAcctResult(exercise);
+      setAcctResult(result || null);
+    } catch { /* le compte de résultat reste tel quel si la requête échoue */ }
+  }, []);
+
+  const openAddEntry = (kind) => {
+    const k = kind || "produit";
+    const firstAccount = acctAccounts.find((a) => a.kind === k && !a.autoSource && !a.hidden);
+    setEntryModal({
+      mode: "add",
+      draft: {
+        id: uid(), exerciseKey: globalSeasonKey, kind: k,
+        accountCode: firstAccount?.code || "", label: "", amount: "", opDate: "",
+      },
+    });
+  };
+  const openEditEntry = (entry) => {
+    if (entry.source === "event") return;
+    setEntryModal({ mode: "edit", draft: { ...entry, amount: String(entry.amount) } });
+  };
+  const openEventFromEntry = (entry) => {
+    const ev = events.find((e) => e.id === entry.eventId);
+    if (ev) openDetail(ev);
+  };
+
+  const submitEntryModal = async () => {
+    const d = entryModal.draft;
+    const amountNum = Number(d.amount);
+    if (!d.label.trim() || !d.accountCode || !Number.isFinite(amountNum) || amountNum <= 0) return;
+    try {
+      if (entryModal.mode === "add") {
+        await api.createEntry({
+          id: d.id, exerciseKey: d.exerciseKey, kind: d.kind, accountCode: d.accountCode,
+          label: d.label.trim(), amount: amountNum, opDate: d.opDate || null,
+        });
+      } else {
+        await api.updateEntry(d.id, {
+          exerciseKey: d.exerciseKey, kind: d.kind, accountCode: d.accountCode,
+          label: d.label.trim(), amount: amountNum, opDate: d.opDate || null,
+        });
+      }
+      setEntryModal(null);
+      const entries = await api.listEntries(globalSeasonKey);
+      setAcctEntries(entries || []);
+      refreshAcctResult(globalSeasonKey);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    }
+  };
+
+  const removeAcctEntry = async (id) => {
+    try {
+      await api.deleteEntry(id);
+      setAcctEntries((list) => list.filter((e) => e.id !== id));
+      refreshAcctResult(globalSeasonKey);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    }
+  };
+
+  const renameAcctAccount = async (code, label) => {
+    setAcctAccounts((list) => list.map((a) => (a.code === code ? { ...a, label } : a)));
+    try { await api.updateAccount(code, { label }); } catch (e) { alert("Erreur : " + e.message); }
+  };
+  const toggleAcctAccountHidden = async (code, hidden) => {
+    setAcctAccounts((list) => list.map((a) => (a.code === code ? { ...a, hidden } : a)));
+    try { await api.updateAccount(code, { hidden }); } catch (e) { alert("Erreur : " + e.message); }
+  };
+  const addAcctAccount = async () => {
+    const code = newAcctAccount.code.trim();
+    const label = newAcctAccount.label.trim();
+    if (!code || !label) return;
+    try {
+      const created = await api.createAccount({ code, label, kind: newAcctAccount.kind });
+      setAcctAccounts((list) => [...list, created]);
+      setNewAcctAccount({ code: "", label: "", kind: newAcctAccount.kind });
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    }
+  };
+
+  const setBalanceField = (patch) => {
+    setBalanceDraft((b) => ({ ...(b || { manualAssets: [], manualLiabilities: [] }), ...patch }));
+    setBalanceDirty(true);
+  };
+  const saveBalanceDraft = async () => {
+    if (!balanceDraft) return;
+    setBalanceSaving(true);
+    try {
+      const saved = await api.updateAcctBalance(globalSeasonKey, {
+        openingTreasury: Number(balanceDraft.openingTreasury) || 0,
+        openingFunds: Number(balanceDraft.openingFunds) || 0,
+        manualAssets: balanceDraft.manualAssets || [],
+        manualLiabilities: balanceDraft.manualLiabilities || [],
+      });
+      setAcctBalance(saved);
+      setBalanceDraft(saved);
+      setBalanceDirty(false);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setBalanceSaving(false);
+    }
+  };
+  const addManualLine = (field) => {
+    setBalanceField({ [field]: [...((balanceDraft && balanceDraft[field]) || []), { label: "", amount: "" }] });
+  };
+  const updateManualLine = (field, idx, patch) => {
+    const lines = [...((balanceDraft && balanceDraft[field]) || [])];
+    lines[idx] = { ...lines[idx], ...patch };
+    setBalanceField({ [field]: lines });
+  };
+  const removeManualLine = (field, idx) => {
+    const lines = [...((balanceDraft && balanceDraft[field]) || [])];
+    lines.splice(idx, 1);
+    setBalanceField({ [field]: lines });
+  };
+
+  const acctVisibleLine = (l) => !l.hidden || l.total !== 0;
+  const sumLines = (lines) => (lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const acctBilan = useMemo(() => {
+    const b = balanceDraft || { openingTreasury: 0, openingFunds: 0, manualAssets: [], manualLiabilities: [] };
+    const totalProduits = acctResult?.totalProduits || 0;
+    const totalCharges = acctResult?.totalCharges || 0;
+    const net = acctResult?.net || 0;
+    const closingTreasury = (Number(b.openingTreasury) || 0) + totalProduits - totalCharges;
+    const manualAssetsTotal = sumLines(b.manualAssets);
+    const manualLiabTotal = sumLines(b.manualLiabilities);
+    const totalActif = closingTreasury + manualAssetsTotal;
+    const totalPassif = (Number(b.openingFunds) || 0) + net + manualLiabTotal;
+    return { closingTreasury, manualAssetsTotal, manualLiabTotal, totalActif, totalPassif, net, diff: totalActif - totalPassif };
+  }, [balanceDraft, acctResult]);
+
+  const csvCell = (v) => {
+    const s = String(v ?? "");
+    return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const exportAcctCsv = () => {
+    if (!acctResult || !balanceDraft) return;
+    const rows = [
+      ["Culturafición — Comptabilité"], [`Exercice ${globalSeasonKey}`], [],
+      ["Compte de résultat"], ["Produits"],
+      ...acctResult.produits.filter(acctVisibleLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
+      ["Total produits", acctResult.totalProduits.toFixed(2)], [],
+      ["Charges"],
+      ...acctResult.charges.filter(acctVisibleLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
+      ["Total charges", acctResult.totalCharges.toFixed(2)], [],
+      ["Résultat net", acctResult.net.toFixed(2)], [],
+      ["Bilan"], ["Actif", ""],
+      ["Trésorerie de clôture", acctBilan.closingTreasury.toFixed(2)],
+      ...((balanceDraft.manualAssets || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
+      ["Total actif", acctBilan.totalActif.toFixed(2)], [],
+      ["Passif", ""],
+      ["Fonds propres (report)", (Number(balanceDraft.openingFunds) || 0).toFixed(2)],
+      ["Résultat de l'exercice", acctResult.net.toFixed(2)],
+      ...((balanceDraft.manualLiabilities || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
+      ["Total passif", acctBilan.totalPassif.toFixed(2)],
+    ];
+    const csv = rows.map((r) => r.map(csvCell).join(";")).join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `culturaficion-comptabilite-${globalSeasonKey}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const exportAcctPdf = () => window.print();
 
   const submitCode = async (e) => {
     e.preventDefault();
@@ -808,6 +1089,9 @@ export default function App() {
           <button className="cf-vt" aria-pressed={view === "adhesions"} onClick={() => setView("adhesions")}>
             <Users size={14} /> Adhésions
           </button>
+          <button className="cf-vt" aria-pressed={view === "compta"} onClick={() => setView("compta")}>
+            <Landmark size={14} /> Comptabilité
+          </button>
         </div>
         <div className="cf-spacer" />
         <div className={"cf-me" + (nameFlash ? " flash" : "")}>
@@ -815,11 +1099,15 @@ export default function App() {
           <input id="cf-name" ref={nameRef} value={me} placeholder="votre prénom" onChange={(e) => saveMe(e.target.value)} />
         </div>
         <button className="cf-btn cf-btn-ghost"
-          onClick={() => { loadState(); if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); } }}
+          onClick={() => {
+            loadState();
+            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); }
+            if (view === "compta") loadAcctAll(globalSeasonKey);
+          }}
           title="Récupérer les ajouts des autres membres">
           <RefreshCw size={15} /> Rafraîchir
         </button>
-        {view !== "adhesions" && (
+        {view !== "adhesions" && view !== "compta" && (
           <button className="cf-btn cf-btn-primary" onClick={() => openAdd()}>
             <Plus size={17} /> Ajouter un événement
           </button>
@@ -1197,6 +1485,236 @@ export default function App() {
         </div>
       )}
 
+      {view === "compta" && (
+        <div className="cf-home">
+          <div className="cf-controls">
+            <span className="cf-season-lab">Exercice {globalSeasonKey}</span>
+            <div className="cf-spacer" />
+            <div className="cf-viewtoggle">
+              <button className="cf-vt" aria-pressed={acctTab === "journaux"} onClick={() => setAcctTab("journaux")}>
+                <BookOpen size={14} /> Journaux
+              </button>
+              <button className="cf-vt" aria-pressed={acctTab === "resultat"} onClick={() => setAcctTab("resultat")}>
+                <ReceiptText size={14} /> Résultat
+              </button>
+              <button className="cf-vt" aria-pressed={acctTab === "bilan"} onClick={() => setAcctTab("bilan")}>
+                <Scale size={14} /> Bilan
+              </button>
+              <button className="cf-vt" aria-pressed={acctTab === "export"} onClick={() => setAcctTab("export")}>
+                <FileDown size={14} /> Export
+              </button>
+            </div>
+          </div>
+
+          <span className="cf-workdoc"><AlertTriangle size={12} /> Document de travail — à valider par le trésorier</span>
+
+          {acctError && <div className="cf-note error">{acctError}</div>}
+
+          {acctLoading ? (
+            <div className="cf-loading" style={{ minHeight: "auto", padding: "26px 0" }}>
+              <Loader2 size={22} className="spin" /> <span>Chargement…</span>
+            </div>
+          ) : (
+            <>
+              {acctTab === "journaux" && (
+                <>
+                  <div className="cf-controls" style={{ margin: "0 0 4px" }}>
+                    <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+                      <button className="cf-sf" aria-pressed={acctKindFilter === "all"} onClick={() => setAcctKindFilter("all")}>Tout</button>
+                      <button className="cf-sf" aria-pressed={acctKindFilter === "produit"} onClick={() => setAcctKindFilter("produit")}>Recettes</button>
+                      <button className="cf-sf" aria-pressed={acctKindFilter === "charge"} onClick={() => setAcctKindFilter("charge")}>Dépenses</button>
+                    </div>
+                    <div className="cf-spacer" />
+                    <button className="cf-btn cf-btn-ghost" onClick={() => setAcctAccountsModal(true)}>
+                      <Tags size={14} /> Postes
+                    </button>
+                    <button className="cf-btn cf-btn-primary" onClick={() => openAddEntry(acctKindFilter === "charge" ? "charge" : "produit")}>
+                      <Plus size={16} /> Ajouter une opération
+                    </button>
+                  </div>
+
+                  {acctEntries.filter((e) => acctKindFilter === "all" || e.kind === acctKindFilter).length === 0 ? (
+                    <div className="cf-empty" style={{ flex: "none" }}>
+                      <b>Aucune opération pour {globalSeasonKey}</b>
+                      <span>Saisissez une cotisation, une subvention, un don ou une dépense manuelle. Les recettes/dépenses des événements de la Frise apparaîtront ici automatiquement.</span>
+                      <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={() => openAddEntry("produit")}>
+                        <Plus size={16} /> Première opération
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="cf-search-list">
+                      {acctEntries
+                        .filter((e) => acctKindFilter === "all" || e.kind === acctKindFilter)
+                        .map((e) => {
+                          const acc = acctAccountById[e.accountCode];
+                          const isEvent = e.source === "event";
+                          const when = fmtDate(e.opDate);
+                          return (
+                            <div className="cf-search-card" key={e.id} style={isEvent ? { cursor: "default" } : undefined}>
+                              <span className="stripe" style={{ background: e.kind === "produit" ? "#3F7A4E" : "#BB322C" }} />
+                              <div className="cf-search-card-main">
+                                <div className="cf-card-title">{e.label}</div>
+                                <div className="cf-card-meta">
+                                  {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
+                                  <span>{acc ? `${acc.code} · ${acc.label}` : e.accountCode}</span>
+                                  {isEvent && <span className="cf-acct-eventbadge">Depuis la Frise</span>}
+                                </div>
+                              </div>
+                              <div className="cf-search-card-stats">
+                                <span className={e.kind === "produit" ? "pos" : "neg"}>
+                                  {e.kind === "produit" ? "+" : "−"}{eur(e.amount)}
+                                </span>
+                                {isEvent ? (
+                                  <button className="cf-act" aria-label="Voir l'événement" title="Voir l'événement dans la Frise"
+                                    onClick={() => openEventFromEntry(e)}>
+                                    <ExternalLink size={13} />
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button className="cf-act" aria-label="Modifier" onClick={() => openEditEntry(e)}><Pencil size={13} /></button>
+                                    <button className="cf-act" aria-label="Supprimer" onClick={() => removeAcctEntry(e.id)}><Trash2 size={13} /></button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {acctTab === "resultat" && acctResult && (
+                <div className="cf-acct-table">
+                  <div className="cf-acct-section">Produits</div>
+                  {acctResult.produits.filter(acctVisibleLine).map((l) => (
+                    <div className={"cf-acct-row" + (l.hidden ? " hidden-acct" : "") + (l.code === "7061" ? " auto" : "")} key={l.code}>
+                      <span><span className="code">{l.code}</span>{l.label}{l.code === "7061" && <span className="cf-acct-eventbadge" style={{ marginLeft: 8 }}>Auto · Frise</span>}</span>
+                      <span className="cf-acct-amount pos">{eur(l.total)}</span>
+                    </div>
+                  ))}
+                  <div className="cf-acct-row total"><span>Total produits</span><span>{eur(acctResult.totalProduits)}</span></div>
+
+                  <div className="cf-acct-section">Charges</div>
+                  {acctResult.charges.filter(acctVisibleLine).map((l) => (
+                    <div className={"cf-acct-row" + (l.hidden ? " hidden-acct" : "") + (l.code === "61" ? " auto" : "")} key={l.code}>
+                      <span><span className="code">{l.code}</span>{l.label}{l.code === "61" && <span className="cf-acct-eventbadge" style={{ marginLeft: 8 }}>Auto · Frise</span>}</span>
+                      <span className="cf-acct-amount neg">{eur(l.total)}</span>
+                    </div>
+                  ))}
+                  <div className="cf-acct-row total"><span>Total charges</span><span>{eur(acctResult.totalCharges)}</span></div>
+
+                  <div className="cf-stat net" style={{ marginTop: 16 }}>
+                    <span><Scale size={13} /> Résultat de l'exercice {globalSeasonKey}</span>
+                    <span className="val" style={{ color: acctResult.net >= 0 ? "#7FB98A" : "#E98A84" }}>
+                      {acctResult.net > 0 ? "+" : ""}{eur(acctResult.net)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {acctTab === "bilan" && balanceDraft && (
+                <div>
+                  <div className="cf-bilan-grid">
+                    <div className="cf-bilan-col">
+                      <div className="cf-bilan-head">Actif</div>
+                      <div className="cf-field">
+                        <span>Trésorerie d'ouverture (€)</span>
+                        <input className="cf-input" type="number" step="0.01" value={balanceDraft.openingTreasury ?? 0}
+                          onChange={(e) => setBalanceField({ openingTreasury: e.target.value })} />
+                      </div>
+                      <div className="cf-bilan-line">
+                        <span>Trésorerie de clôture (calculée)</span>
+                        <span style={{ fontWeight: 700 }}>{eur(acctBilan.closingTreasury)}</span>
+                      </div>
+                      <span className="cf-field-label" style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "#7a6f63", marginTop: 6, fontWeight: 700 }}>
+                        Compléments d'actif
+                      </span>
+                      {(balanceDraft.manualAssets || []).map((l, idx) => (
+                        <div className="cf-bilan-manual-row" key={idx}>
+                          <input className="lab2" placeholder="ex. Matériel, créances…" value={l.label}
+                            onChange={(e) => updateManualLine("manualAssets", idx, { label: e.target.value })} />
+                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount}
+                            onChange={(e) => updateManualLine("manualAssets", idx, { amount: e.target.value })} />
+                          <button className="cf-act" aria-label="Retirer la ligne" onClick={() => removeManualLine("manualAssets", idx)}><X size={13} /></button>
+                        </div>
+                      ))}
+                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => addManualLine("manualAssets")}>
+                        <Plus size={14} /> Ajouter une ligne
+                      </button>
+                      <div className="cf-bilan-total"><span>Total actif</span><span>{eur(acctBilan.totalActif)}</span></div>
+                    </div>
+
+                    <div className="cf-bilan-col">
+                      <div className="cf-bilan-head">Passif</div>
+                      <div className="cf-field">
+                        <span>Fonds propres reportés (€)</span>
+                        <input className="cf-input" type="number" step="0.01" value={balanceDraft.openingFunds ?? 0}
+                          onChange={(e) => setBalanceField({ openingFunds: e.target.value })} />
+                      </div>
+                      <div className="cf-bilan-line">
+                        <span>Résultat de l'exercice (repris)</span>
+                        <span style={{ fontWeight: 700, color: acctBilan.net >= 0 ? "#3F7A4E" : "#BB322C" }}>
+                          {acctBilan.net > 0 ? "+" : ""}{eur(acctBilan.net)}
+                        </span>
+                      </div>
+                      <span className="cf-field-label" style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "#7a6f63", marginTop: 6, fontWeight: 700 }}>
+                        Compléments de passif
+                      </span>
+                      {(balanceDraft.manualLiabilities || []).map((l, idx) => (
+                        <div className="cf-bilan-manual-row" key={idx}>
+                          <input className="lab2" placeholder="ex. Dettes…" value={l.label}
+                            onChange={(e) => updateManualLine("manualLiabilities", idx, { label: e.target.value })} />
+                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount}
+                            onChange={(e) => updateManualLine("manualLiabilities", idx, { amount: e.target.value })} />
+                          <button className="cf-act" aria-label="Retirer la ligne" onClick={() => removeManualLine("manualLiabilities", idx)}><X size={13} /></button>
+                        </div>
+                      ))}
+                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => addManualLine("manualLiabilities")}>
+                        <Plus size={14} /> Ajouter une ligne
+                      </button>
+                      <div className="cf-bilan-total"><span>Total passif</span><span>{eur(acctBilan.totalPassif)}</span></div>
+                    </div>
+                  </div>
+
+                  <div className={"cf-balance-check " + (Math.abs(acctBilan.diff) < 0.01 ? "ok" : "off")}>
+                    {Math.abs(acctBilan.diff) < 0.01 ? (
+                      <><Check size={16} /> Équilibré</>
+                    ) : (
+                      <><AlertTriangle size={16} /> Écart de {eur(Math.abs(acctBilan.diff))}</>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
+                    <button className="cf-btn cf-btn-primary" disabled={!balanceDirty || balanceSaving} onClick={saveBalanceDraft}>
+                      <Check size={16} /> {balanceSaving ? "Enregistrement…" : "Enregistrer le bilan"}
+                    </button>
+                    {balanceDirty && <span className="cf-hint">Modifications non enregistrées</span>}
+                  </div>
+                </div>
+              )}
+
+              {acctTab === "export" && (
+                <div>
+                  <p style={{ fontSize: 13, color: "#7a6f63", maxWidth: 560 }}>
+                    Exportez le compte de résultat et le bilan de l'exercice {globalSeasonKey} pour l'assemblée générale.
+                    Le document reprend la mention « à valider par le trésorier ».
+                  </p>
+                  <div className="cf-export-actions">
+                    <button className="cf-btn cf-btn-primary" onClick={exportAcctPdf} disabled={!acctResult || !balanceDraft}>
+                      <FileDown size={16} /> Exporter en PDF
+                    </button>
+                    <button className="cf-btn cf-btn-ghost" onClick={exportAcctCsv} disabled={!acctResult || !balanceDraft}>
+                      <FileSpreadsheet size={16} /> Exporter en Excel/CSV
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* membership modal */}
       {membModal && (
         <div className="cf-scrim" onMouseDown={(e) => e.target === e.currentTarget && setMembModal(null)}>
@@ -1496,6 +2014,195 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* accounting entry modal */}
+      {entryModal && (
+        <div className="cf-scrim" onMouseDown={(e) => e.target === e.currentTarget && setEntryModal(null)}>
+          <div className="cf-modal" role="dialog" aria-modal="true">
+            <div className="cf-modal-head">
+              <h3>{entryModal.mode === "add" ? "Nouvelle opération" : "Modifier l'opération"}</h3>
+              <button className="cf-iconbtn" aria-label="Fermer" onClick={() => setEntryModal(null)}><X size={16} /></button>
+            </div>
+            <div className="cf-modal-body">
+              <div className="cf-field">
+                <span>Type</span>
+                <div className="cf-pickrow">
+                  {["produit", "charge"].map((k) => (
+                    <button key={k} className="cf-pick" aria-pressed={entryModal.draft.kind === k}
+                      onClick={() => {
+                        const firstAccount = acctAccounts.find((a) => a.kind === k && !a.autoSource && !a.hidden);
+                        setEntryModal((m) => ({ ...m, draft: { ...m.draft, kind: k, accountCode: firstAccount?.code || "" } }));
+                      }}>
+                      {k === "produit" ? "Recette" : "Dépense"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="cf-field">
+                <span>Poste</span>
+                <div className="cf-pickrow">
+                  {acctAccounts
+                    .filter((a) => a.kind === entryModal.draft.kind && !a.autoSource && (!a.hidden || a.code === entryModal.draft.accountCode))
+                    .map((a) => (
+                      <button key={a.code} className="cf-pick" aria-pressed={entryModal.draft.accountCode === a.code}
+                        onClick={() => setEntryModal((m) => ({ ...m, draft: { ...m.draft, accountCode: a.code } }))}>
+                        {a.code} · {a.label}
+                      </button>
+                    ))}
+                </div>
+              </div>
+              <label className="cf-field">
+                <span>Libellé</span>
+                <input className="cf-input" autoFocus value={entryModal.draft.label}
+                  placeholder="ex. Cotisation Dupont, Subvention mairie…"
+                  onChange={(e) => setEntryModal((m) => ({ ...m, draft: { ...m.draft, label: e.target.value } }))}
+                  onKeyDown={(e) => e.key === "Enter" && submitEntryModal()} />
+              </label>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Montant (€)</span>
+                  <input className="cf-input" type="number" step="0.01" min="0" value={entryModal.draft.amount}
+                    onChange={(e) => setEntryModal((m) => ({ ...m, draft: { ...m.draft, amount: e.target.value } }))}
+                    onKeyDown={(e) => e.key === "Enter" && submitEntryModal()} />
+                </label>
+                <label className="cf-field" style={{ flex: "1 1 150px" }}>
+                  <span>Date (facultatif)</span>
+                  <input type="date" className="cf-input" value={entryModal.draft.opDate || ""}
+                    onChange={(e) => setEntryModal((m) => ({ ...m, draft: { ...m.draft, opDate: e.target.value } }))} />
+                </label>
+              </div>
+              <div className="cf-field">
+                <span>Exercice</span>
+                <div className="cf-season" style={{ marginTop: 2 }}>
+                  <button type="button" className="cf-iconbtn" aria-label="Exercice précédent"
+                    onClick={() => setEntryModal((m) => ({ ...m, draft: { ...m.draft, exerciseKey: seasonKeyFromStart(seasonStartYear(m.draft.exerciseKey) - 1) } }))}>
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className="cf-season-lab">{entryModal.draft.exerciseKey}</span>
+                  <button type="button" className="cf-iconbtn" aria-label="Exercice suivant"
+                    onClick={() => setEntryModal((m) => ({ ...m, draft: { ...m.draft, exerciseKey: seasonKeyFromStart(seasonStartYear(m.draft.exerciseKey) + 1) } }))}>
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+                <span className="cf-subhint">La saisie sur un exercice passé est possible : changez l'exercice ci-dessus si besoin.</span>
+              </div>
+              {(!entryModal.draft.label.trim() || !entryModal.draft.accountCode || !(Number(entryModal.draft.amount) > 0)) && (
+                <span className="cf-hint">Renseignez un libellé, un poste et un montant positif pour enregistrer.</span>
+              )}
+            </div>
+            <div className="cf-modal-foot">
+              <button className="cf-btn cf-btn-ghost" onClick={() => setEntryModal(null)}>Annuler</button>
+              <button className="cf-btn cf-btn-primary" onClick={submitEntryModal}>
+                <Check size={16} /> {entryModal.mode === "add" ? "Ajouter" : "Enregistrer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* accounting chart-of-accounts manager */}
+      {acctAccountsModal && (
+        <div className="cf-scrim" onMouseDown={(e) => e.target === e.currentTarget && setAcctAccountsModal(false)}>
+          <div className="cf-modal" role="dialog" aria-modal="true">
+            <div className="cf-modal-head">
+              <h3>Postes comptables</h3>
+              <button className="cf-iconbtn" aria-label="Fermer" onClick={() => setAcctAccountsModal(false)}><X size={16} /></button>
+            </div>
+            <div className="cf-modal-body">
+              <p style={{ margin: 0, fontSize: 13, color: "#7a6f63" }}>
+                Renommez ou masquez un poste, ou ajoutez-en un nouveau. Les postes 7061 et 61 sont alimentés automatiquement
+                par la Frise et ne peuvent pas être modifiés ici. Masquer un poste ne supprime pas les écritures déjà saisies.
+              </p>
+              {["produit", "charge"].map((kind) => (
+                <div key={kind}>
+                  <div className="cf-accueil-kicker" style={{ textAlign: "left", margin: "10px 0 4px" }}>
+                    {kind === "produit" ? "Produits" : "Charges"}
+                  </div>
+                  <div className="cf-catlist">
+                    {acctAccounts.filter((a) => a.kind === kind).map((a) => (
+                      <div className="cf-catrow" key={a.code}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#9a8d7c", minWidth: 44 }}>{a.code}</span>
+                        <input className="lab" value={a.label} disabled={!!a.autoSource}
+                          onChange={(e) => renameAcctAccount(a.code, e.target.value)} aria-label="Nom du poste" />
+                        {a.autoSource && <span className="used">auto</span>}
+                        <button className="cf-act" aria-label={a.hidden ? "Réafficher le poste" : "Masquer le poste"}
+                          title={a.hidden ? "Réafficher" : "Masquer"} onClick={() => toggleAcctAccountHidden(a.code, !a.hidden)}>
+                          {a.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="cf-addcat">
+                <input className="cf-input" style={{ width: 90 }} placeholder="Code"
+                  value={newAcctAccount.code} onChange={(e) => setNewAcctAccount((n) => ({ ...n, code: e.target.value }))} />
+                <input className="cf-input" style={{ flex: 1 }} placeholder="Libellé du poste"
+                  value={newAcctAccount.label} onChange={(e) => setNewAcctAccount((n) => ({ ...n, label: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && addAcctAccount()} />
+                <div className="cf-pickrow">
+                  {["produit", "charge"].map((k) => (
+                    <button key={k} className="cf-pick" aria-pressed={newAcctAccount.kind === k}
+                      onClick={() => setNewAcctAccount((n) => ({ ...n, kind: k }))}>
+                      {k === "produit" ? "Produit" : "Charge"}
+                    </button>
+                  ))}
+                </div>
+                <button className="cf-btn cf-btn-primary" onClick={addAcctAccount}
+                  disabled={!newAcctAccount.code.trim() || !newAcctAccount.label.trim()}>
+                  <Plus size={15} /> Ajouter
+                </button>
+              </div>
+            </div>
+            <div className="cf-modal-foot">
+              <button className="cf-btn cf-btn-ghost" onClick={() => setAcctAccountsModal(false)}>Fermer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* feuille imprimable (PDF) : masquée à l'écran, affichée seulement à l'impression */}
+      {acctResult && balanceDraft && (
+        <div className="cf-print-sheet">
+          <h1>Culturafición — Comptabilité</h1>
+          <h2>Exercice {globalSeasonKey}</h2>
+          <p style={{ fontSize: 12, fontStyle: "italic" }}>
+            Document de travail établi par l'outil de planning — à valider par le trésorier avant l'assemblée générale.
+            Généré le {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}.
+          </p>
+
+          <h2 style={{ marginTop: 20 }}>Compte de résultat</h2>
+          <h3>Produits</h3>
+          {acctResult.produits.filter(acctVisibleLine).map((l) => (
+            <div className="cf-print-row" key={l.code}><span>{l.code} · {l.label}</span><span>{eur(l.total)}</span></div>
+          ))}
+          <div className="cf-print-row total"><span>Total produits</span><span>{eur(acctResult.totalProduits)}</span></div>
+          <h3>Charges</h3>
+          {acctResult.charges.filter(acctVisibleLine).map((l) => (
+            <div className="cf-print-row" key={l.code}><span>{l.code} · {l.label}</span><span>{eur(l.total)}</span></div>
+          ))}
+          <div className="cf-print-row total"><span>Total charges</span><span>{eur(acctResult.totalCharges)}</span></div>
+          <div className="cf-print-row total"><span>Résultat net</span><span>{acctResult.net > 0 ? "+" : ""}{eur(acctResult.net)}</span></div>
+
+          <h2 style={{ marginTop: 20 }}>Bilan</h2>
+          <h3>Actif</h3>
+          <div className="cf-print-row"><span>Trésorerie de clôture</span><span>{eur(acctBilan.closingTreasury)}</span></div>
+          {(balanceDraft.manualAssets || []).map((l, i) => (
+            <div className="cf-print-row" key={i}><span>{l.label}</span><span>{eur(Number(l.amount) || 0)}</span></div>
+          ))}
+          <div className="cf-print-row total"><span>Total actif</span><span>{eur(acctBilan.totalActif)}</span></div>
+          <h3>Passif</h3>
+          <div className="cf-print-row"><span>Fonds propres reportés</span><span>{eur(Number(balanceDraft.openingFunds) || 0)}</span></div>
+          <div className="cf-print-row"><span>Résultat de l'exercice</span><span>{eur(acctResult.net)}</span></div>
+          {(balanceDraft.manualLiabilities || []).map((l, i) => (
+            <div className="cf-print-row" key={i}><span>{l.label}</span><span>{eur(Number(l.amount) || 0)}</span></div>
+          ))}
+          <div className="cf-print-row total"><span>Total passif</span><span>{eur(acctBilan.totalPassif)}</span></div>
+          <p style={{ marginTop: 14, fontWeight: 700 }}>
+            {Math.abs(acctBilan.diff) < 0.01 ? "Équilibré" : `Écart de ${eur(Math.abs(acctBilan.diff))}`}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

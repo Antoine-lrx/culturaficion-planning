@@ -34,6 +34,50 @@ export function rowToMembership(row) {
   };
 }
 
+export function rowToAccount(row) {
+  return {
+    code: row.code,
+    label: row.label,
+    kind: row.kind,
+    autoSource: row.auto_source,
+    position: row.position,
+    hidden: !!row.hidden,
+  };
+}
+
+export function rowToEntry(row) {
+  return {
+    id: row.id,
+    exerciseKey: row.exercise_key,
+    opDate: row.op_date,
+    kind: row.kind,
+    accountCode: row.account_code,
+    label: row.label,
+    amount: row.amount,
+    source: "manual",
+    createdAt: row.created_at,
+  };
+}
+
+export function rowToBalance(row, exerciseKey) {
+  if (!row) {
+    return {
+      exerciseKey,
+      openingTreasury: 0,
+      openingFunds: 0,
+      manualAssets: [],
+      manualLiabilities: [],
+    };
+  }
+  return {
+    exerciseKey: row.exercise_key,
+    openingTreasury: row.opening_treasury || 0,
+    openingFunds: row.opening_funds || 0,
+    manualAssets: safeParseArray(row.manual_assets),
+    manualLiabilities: safeParseArray(row.manual_liabilities),
+  };
+}
+
 function safeParseArray(raw) {
   if (!raw) return [];
   try {

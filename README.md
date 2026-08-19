@@ -243,8 +243,19 @@ Chaque événement peut porter un champ optionnel « Identifiant HelloAsso »
 (le `formSlug` de sa billetterie). S'il est renseigné, la fiche bilan
 appelle un endpoint serveur qui récupère, auprès de l'API HelloAsso, le
 nombre d'inscriptions et les recettes validées, et les affiche à côté des
-champs saisis à la main (sans les remplacer, et sans entrer dans le calcul
-du résultat net).
+champs saisis à la main.
+
+> **Piège fréquent : HelloAsso n'écrit jamais dans les champs Recettes/
+> Dépenses.** « Inscrits HelloAsso » et « Recettes HelloAsso » sont des
+> chiffres **purement informatifs**, recalculés en direct à chaque ouverture
+> de la fiche — ils ne remplacent ni ne remplissent automatiquement les
+> champs **Recettes (€)** / **Dépenses (€)** juste au-dessus. Ce sont ces
+> deux champs-là (saisis à la main par le trésorier, en s'aidant au besoin
+> du chiffre HelloAsso affiché à côté) qui comptent partout ailleurs dans
+> l'app : « Net de saison » sur la Frise, et compte 7061/61 du module
+> Comptabilité (section 8). Tant que « Recettes (€) » n'est pas rempli pour
+> un événement, il contribue 0 € à ces totaux — même si HelloAsso affiche un
+> montant à côté.
 
 Aucun identifiant HelloAsso n'est exposé au frontend : tout passe par
 l'endpoint serveur `GET /api/helloasso/:formSlug`, protégé par le même code
@@ -419,6 +430,11 @@ Deux sources bien distinctes :
   apparaissent détaillés par événement, avec la mention « Depuis la Frise »
   et un lien vers l'événement ; on ne les modifie qu'en éditant l'événement
   dans la Frise.
+  > Précisément, ce sont les champs **Recettes (€)** / **Dépenses (€)** de la
+  > fiche événement qui comptent ici — **pas** « Recettes HelloAsso », qui
+  > n'est qu'un affichage informatif à côté (voir le piège décrit en
+  > section 6). Un événement dont « Recettes (€) » est encore vide contribue
+  > 0 € à 7061, même si sa billetterie HelloAsso a déjà encaissé de l'argent.
 - **Tout le reste** (cotisations, subventions, dons, ventes, assurances,
   fournitures, frais bancaires…) se **saisit à la main** dans le journal,
   rattaché à un poste et à un exercice. La saisie sur un exercice passé est

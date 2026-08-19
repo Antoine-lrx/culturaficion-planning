@@ -59,26 +59,7 @@ export function rowToEntry(row) {
   };
 }
 
-export function rowToBalance(row, exerciseKey) {
-  if (!row) {
-    return {
-      exerciseKey,
-      openingTreasury: 0,
-      openingFunds: 0,
-      manualAssets: [],
-      manualLiabilities: [],
-    };
-  }
-  return {
-    exerciseKey: row.exercise_key,
-    openingTreasury: row.opening_treasury || 0,
-    openingFunds: row.opening_funds || 0,
-    manualAssets: safeParseArray(row.manual_assets),
-    manualLiabilities: safeParseArray(row.manual_liabilities),
-  };
-}
-
-function safeParseArray(raw) {
+export function safeParseArray(raw) {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);

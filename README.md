@@ -434,12 +434,24 @@ Deux sources bien distinctes :
 2. **Résultat** — compte de résultat calculé automatiquement : produits par
    poste, charges par poste, sous-totaux, résultat net mis en avant (vert si
    excédent, rouge si déficit).
-3. **Bilan** — trésorerie de clôture calculée (`trésorerie d'ouverture +
-   recettes − dépenses`), fonds propres reportés + résultat de l'exercice,
-   compléments d'actif/passif saisis à la main, et un contrôle d'équilibre
-   (« Équilibré ✅ » / « Écart de X € ⚠️ », non bloquant). Dans le cas simple
-   d'une compta de trésorerie, `fonds propres reportés = trésorerie
-   d'ouverture` et le bilan s'équilibre naturellement.
+3. **Bilan** — **report à nouveau automatique** : l'ouverture (trésorerie +
+   fonds propres) d'un exercice est calculée par le serveur à partir de la
+   clôture de l'exercice précédent, en remontant récursivement la chaîne
+   jusqu'au premier exercice suivi. Une seule saisie manuelle dans toute la
+   vie de l'outil : la trésorerie d'ouverture du tout premier exercice
+   (l'appli invite à la saisir si aucun exercice antérieur n'est trouvé en
+   base). Un lien discret « ajuster » permet de forcer une valeur pour un
+   exercice donné (prime alors sur le report automatique, avec un lien
+   « revenir à l'automatique » pour l'annuler). Le bouton **Clôturer
+   l'exercice** fige la trésorerie et les fonds propres de clôture — les
+   chiffres présentés à l'AG ne bougent plus ensuite, même si une écriture
+   antérieure est modifiée par erreur — et les reporte comme ouverture de
+   l'exercice suivant ; **Rouvrir** permet de corriger une clôture faite par
+   erreur. Tant qu'un exercice n'est pas clôturé, son ouverture (et celle de
+   ses successeurs) reste recalculée en direct. Le bilan affiche aussi les
+   compléments d'actif/passif saisis à la main et un contrôle d'équilibre
+   (« Équilibré ✅ » / « Écart de X € ⚠️ », non bloquant — un écart signale
+   qu'un élément de patrimoine hors trésorerie reste à déclarer).
 4. **Export** — export du compte de résultat + bilan de l'exercice affiché,
    en PDF (génération via l'impression du navigateur, mise en page sobre) et
    en Excel/CSV (aucune bibliothèque tierce, génération 100 % côté client).
@@ -483,19 +495,32 @@ Deux sources bien distinctes :
   n'existent pas dans cette table et ne peuvent donc pas être touchées ici).
 - `GET /api/accounting/result?exercise=2025-2026` — compte de résultat
   calculé (total par poste + résultat net).
-- `GET /api/accounting/balance?exercise=2025-2026` /
-  `PUT /api/accounting/balance?exercise=2025-2026` — lit/enregistre les
-  soldes d'ouverture et compléments de bilan de l'exercice.
+- `GET /api/accounting/balance?exercise=2025-2026` — bilan calculé : ouverture
+  (reportée automatiquement de l'exercice précédent, ou saisie/ajustée à la
+  main), trésorerie et fonds propres de clôture, compléments manuels et
+  contrôle d'équilibre.
+- `PUT /api/accounting/balance?exercise=2025-2026` — force une ouverture
+  manuelle (`openingTreasury`/`openingFunds`, ou `{"openingSource":"auto"}`
+  pour revenir au report automatique) et/ou enregistre les compléments
+  d'actif/passif.
+- `POST /api/accounting/close?exercise=2025-2026` — clôture l'exercice : fige
+  sa trésorerie et ses fonds propres de clôture, et les reporte comme
+  ouverture automatique de l'exercice suivant.
+- `POST /api/accounting/reopen?exercise=2025-2026` — annule une clôture faite
+  par erreur.
 
 Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 
-### Migration à appliquer
+### Migrations à appliquer
 
 ```
 npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0005_add_accounting.sql
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0006_accounting_opening_chain.sql
 ```
 
-Cette migration crée uniquement les tables `acct_accounts`, `acct_entries`
-et `acct_balance` (avec le plan de comptes ci-dessus déjà inséré) — elle ne
-touche à aucune table existante (`events`, `categories`, `meta`,
-`memberships`).
+La migration 0005 crée les tables `acct_accounts`, `acct_entries` et
+`acct_balance` (avec le plan de comptes ci-dessus déjà inséré). La migration
+0006 ajoute à `acct_balance` les colonnes nécessaires au report à nouveau
+automatique (`opening_source`, `closed`, `closed_at`, `closing_treasury`,
+`closing_funds`). Aucune des deux ne touche à une table existante (`events`,
+`categories`, `meta`, `memberships`).

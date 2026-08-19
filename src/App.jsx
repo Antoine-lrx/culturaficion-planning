@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   Plus, Heart, Trash2, Pencil, X, RefreshCw,
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
-  Users, Wallet, Scale, Lock, Loader2, Home, Search, MapPin, List,
+  Users, Wallet, Scale, Lock, Unlock, Loader2, Home, Search, MapPin, List,
   Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
   ReceiptText, Eye, EyeOff, BookOpen,
 } from "lucide-react";
@@ -368,6 +368,13 @@ html, body{
 .cf-workdoc{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a7550;
   background:rgba(184,134,46,.1);border:1px dashed rgba(184,134,46,.4);border-radius:999px;padding:5px 12px;
   display:inline-flex;align-items:center;gap:6px;margin:6px 0}
+.cf-link{appearance:none;border:0;background:transparent;padding:0;font-family:inherit;font-size:11.5px;
+  font-weight:600;color:var(--sangre);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.cf-link:hover{color:var(--sangre-deep)}
+.cf-link:disabled{opacity:.5;cursor:default}
+.cf-bilan-opening-source{font-size:11px;color:#9a8d7c;display:block;margin-top:2px}
+.cf-closed-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#8a7550;
+  background:rgba(184,134,46,.1);border:1px solid rgba(184,134,46,.35);border-radius:10px;padding:10px 14px;margin-bottom:14px}
 .cf-export-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
 .cf-print-sheet{display:none}
 @media print{
@@ -449,6 +456,10 @@ export default function App() {
   const [balanceDraft, setBalanceDraft] = useState(null);
   const [balanceDirty, setBalanceDirty] = useState(false);
   const [balanceSaving, setBalanceSaving] = useState(false);
+  const [openingEditing, setOpeningEditing] = useState(false);
+  const [openingEditDraft, setOpeningEditDraft] = useState({ treasury: "", funds: "" });
+  const [openingSaving, setOpeningSaving] = useState(false);
+  const [closingSaving, setClosingSaving] = useState(false);
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctError, setAcctError] = useState("");
   const [acctKindFilter, setAcctKindFilter] = useState("all");
@@ -567,6 +578,11 @@ export default function App() {
       setAcctBalance(balance || null);
       setBalanceDraft(balance || null);
       setBalanceDirty(false);
+      setOpeningEditing(Boolean(balance?.needsFirstEntry));
+      setOpeningEditDraft({
+        treasury: balance?.needsFirstEntry ? "" : String(balance?.openingTreasury ?? 0),
+        funds: balance?.needsFirstEntry ? "" : String(balance?.openingFunds ?? 0),
+      });
     } catch (e) {
       if (e.unauthorized) {
         clearCode();
@@ -588,6 +604,15 @@ export default function App() {
       const result = await api.getAcctResult(exercise);
       setAcctResult(result || null);
     } catch { /* le compte de résultat reste tel quel si la requête échoue */ }
+  }, []);
+
+  // Le bilan (trésorerie de clôture, totaux actif/passif) dépend du compte
+  // de résultat : à rafraîchir avec lui à chaque écriture ajoutée/modifiée.
+  const refreshAcctBalance = useCallback(async (exercise) => {
+    try {
+      const balance = await api.getAcctBalance(exercise);
+      setAcctBalance(balance || null);
+    } catch { /* le bilan reste tel quel si la requête échoue */ }
   }, []);
 
   const openAddEntry = (kind) => {
@@ -630,6 +655,7 @@ export default function App() {
       const entries = await api.listEntries(globalSeasonKey);
       setAcctEntries(entries || []);
       refreshAcctResult(globalSeasonKey);
+      refreshAcctBalance(globalSeasonKey);
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -640,6 +666,7 @@ export default function App() {
       await api.deleteEntry(id);
       setAcctEntries((list) => list.filter((e) => e.id !== id));
       refreshAcctResult(globalSeasonKey);
+      refreshAcctBalance(globalSeasonKey);
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -675,8 +702,6 @@ export default function App() {
     setBalanceSaving(true);
     try {
       const saved = await api.updateAcctBalance(globalSeasonKey, {
-        openingTreasury: Number(balanceDraft.openingTreasury) || 0,
-        openingFunds: Number(balanceDraft.openingFunds) || 0,
         manualAssets: balanceDraft.manualAssets || [],
         manualLiabilities: balanceDraft.manualLiabilities || [],
       });
@@ -687,6 +712,70 @@ export default function App() {
       alert("Erreur : " + e.message);
     } finally {
       setBalanceSaving(false);
+    }
+  };
+
+  // Report à nouveau automatique : l'ouverture (trésorerie + fonds propres)
+  // d'un exercice est calculée par le serveur à partir de la clôture du
+  // précédent. On ne l'ajuste à la main que pour le tout premier exercice
+  // suivi, ou en cas de correction ponctuelle.
+  const startOpeningEdit = () => {
+    setOpeningEditDraft({
+      treasury: String(acctBalance?.openingTreasury ?? 0),
+      funds: String(acctBalance?.openingFunds ?? 0),
+    });
+    setOpeningEditing(true);
+  };
+  const cancelOpeningEdit = () => setOpeningEditing(false);
+  const submitOpeningEdit = async () => {
+    const treasury = Number(openingEditDraft.treasury);
+    if (!Number.isFinite(treasury)) return;
+    const funds = openingEditDraft.funds.trim() === "" ? treasury : Number(openingEditDraft.funds);
+    if (!Number.isFinite(funds)) return;
+    setOpeningSaving(true);
+    try {
+      const saved = await api.updateAcctBalance(globalSeasonKey, { openingTreasury: treasury, openingFunds: funds });
+      setAcctBalance(saved);
+      setOpeningEditing(false);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setOpeningSaving(false);
+    }
+  };
+  const revertOpeningToAuto = async () => {
+    setOpeningSaving(true);
+    try {
+      const saved = await api.updateAcctBalance(globalSeasonKey, { openingSource: "auto" });
+      setAcctBalance(saved);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setOpeningSaving(false);
+    }
+  };
+  const closeExercise = async () => {
+    if (!confirm(`Clôturer l'exercice ${globalSeasonKey} ? Ses chiffres seront figés et reportés comme ouverture de l'exercice suivant.`)) return;
+    setClosingSaving(true);
+    try {
+      const saved = await api.closeAcctExercise(globalSeasonKey);
+      setAcctBalance(saved);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setClosingSaving(false);
+    }
+  };
+  const reopenExercise = async () => {
+    if (!confirm(`Rouvrir l'exercice ${globalSeasonKey} pour le modifier ?`)) return;
+    setClosingSaving(true);
+    try {
+      const saved = await api.reopenAcctExercise(globalSeasonKey);
+      setAcctBalance(saved);
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setClosingSaving(false);
     }
   };
   const addManualLine = (field) => {
@@ -705,25 +794,23 @@ export default function App() {
 
   const acctVisibleLine = (l) => !l.hidden || l.total !== 0;
   const sumLines = (lines) => (lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const acctBilan = useMemo(() => {
-    const b = balanceDraft || { openingTreasury: 0, openingFunds: 0, manualAssets: [], manualLiabilities: [] };
-    const totalProduits = acctResult?.totalProduits || 0;
-    const totalCharges = acctResult?.totalCharges || 0;
-    const net = acctResult?.net || 0;
-    const closingTreasury = (Number(b.openingTreasury) || 0) + totalProduits - totalCharges;
-    const manualAssetsTotal = sumLines(b.manualAssets);
-    const manualLiabTotal = sumLines(b.manualLiabilities);
-    const totalActif = closingTreasury + manualAssetsTotal;
-    const totalPassif = (Number(b.openingFunds) || 0) + net + manualLiabTotal;
-    return { closingTreasury, manualAssetsTotal, manualLiabTotal, totalActif, totalPassif, net, diff: totalActif - totalPassif };
-  }, [balanceDraft, acctResult]);
+  // Aperçu en direct des totaux actif/passif pendant la saisie des lignes
+  // manuelles, avant enregistrement (l'ouverture, la clôture et le résultat
+  // viennent eux du bilan calculé côté serveur).
+  const acctBilanPreview = useMemo(() => {
+    const closingTreasury = acctBalance?.closingTreasury || 0;
+    const closingFunds = acctBalance?.closingFunds || 0;
+    const totalActif = closingTreasury + sumLines(balanceDraft?.manualAssets);
+    const totalPassif = closingFunds + sumLines(balanceDraft?.manualLiabilities);
+    return { totalActif, totalPassif, diff: totalActif - totalPassif };
+  }, [acctBalance, balanceDraft]);
 
   const csvCell = (v) => {
     const s = String(v ?? "");
     return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const exportAcctCsv = () => {
-    if (!acctResult || !balanceDraft) return;
+    if (!acctResult || !acctBalance) return;
     const rows = [
       ["Culturafición — Comptabilité"], [`Exercice ${globalSeasonKey}`], [],
       ["Compte de résultat"], ["Produits"],
@@ -734,14 +821,14 @@ export default function App() {
       ["Total charges", acctResult.totalCharges.toFixed(2)], [],
       ["Résultat net", acctResult.net.toFixed(2)], [],
       ["Bilan"], ["Actif", ""],
-      ["Trésorerie de clôture", acctBilan.closingTreasury.toFixed(2)],
-      ...((balanceDraft.manualAssets || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
-      ["Total actif", acctBilan.totalActif.toFixed(2)], [],
+      ["Trésorerie de clôture", acctBalance.closingTreasury.toFixed(2)],
+      ...((acctBalance.manualAssets || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
+      ["Total actif", acctBalance.totalActif.toFixed(2)], [],
       ["Passif", ""],
-      ["Fonds propres (report)", (Number(balanceDraft.openingFunds) || 0).toFixed(2)],
+      ["Fonds propres (report)", (Number(acctBalance.openingFunds) || 0).toFixed(2)],
       ["Résultat de l'exercice", acctResult.net.toFixed(2)],
-      ...((balanceDraft.manualLiabilities || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
-      ["Total passif", acctBilan.totalPassif.toFixed(2)],
+      ...((acctBalance.manualLiabilities || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
+      ["Total passif", acctBalance.totalPassif.toFixed(2)],
     ];
     const csv = rows.map((r) => r.map(csvCell).join(";")).join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
@@ -1613,49 +1700,109 @@ export default function App() {
                 </div>
               )}
 
-              {acctTab === "bilan" && balanceDraft && (
+              {acctTab === "bilan" && acctBalance && balanceDraft && (
                 <div>
+                  {acctBalance.closed && (
+                    <div className="cf-closed-banner">
+                      <Lock size={14} />
+                      <span>
+                        Exercice clôturé{acctBalance.closedAt ? ` le ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date(acctBalance.closedAt))}` : ""} — chiffres figés pour l'assemblée générale.
+                      </span>
+                      <button className="cf-btn cf-btn-ghost" style={{ marginLeft: "auto" }} disabled={closingSaving} onClick={reopenExercise}>
+                        <Unlock size={14} /> {closingSaving ? "…" : "Rouvrir"}
+                      </button>
+                    </div>
+                  )}
+
+                  {openingEditing ? (
+                    <div className="cf-note" style={{ marginBottom: 14 }}>
+                      {acctBalance.needsFirstEntry && (
+                        <p style={{ margin: "0 0 10px" }}>
+                          Aucun exercice antérieur n'est suivi dans l'outil : saisissez, <b>une seule fois</b>, la trésorerie de départ de l'exercice {globalSeasonKey}.
+                          Les exercices suivants reporteront ensuite automatiquement leur ouverture.
+                        </p>
+                      )}
+                      <div className="cf-bilan-grid" style={{ marginBottom: 10 }}>
+                        <div className="cf-field">
+                          <span>Trésorerie d'ouverture (€)</span>
+                          <input className="cf-input" type="number" step="0.01" value={openingEditDraft.treasury}
+                            onChange={(e) => setOpeningEditDraft((d) => ({ ...d, treasury: e.target.value }))} />
+                        </div>
+                        <div className="cf-field">
+                          <span>Fonds propres d'ouverture (€)</span>
+                          <input className="cf-input" type="number" step="0.01" placeholder={`= ${openingEditDraft.treasury || 0} si vide`} value={openingEditDraft.funds}
+                            onChange={(e) => setOpeningEditDraft((d) => ({ ...d, funds: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <button className="cf-btn cf-btn-primary" disabled={openingSaving || openingEditDraft.treasury.trim() === ""} onClick={submitOpeningEdit}>
+                          <Check size={16} /> {openingSaving ? "Enregistrement…" : acctBalance.needsFirstEntry ? "Confirmer l'ouverture" : "Enregistrer l'ajustement"}
+                        </button>
+                        {!acctBalance.needsFirstEntry && (
+                          <button className="cf-btn cf-btn-ghost" onClick={cancelOpeningEdit} disabled={openingSaving}>Annuler</button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                      <div className="cf-bilan-line">
+                        <span>
+                          Trésorerie d'ouverture
+                          <span className="cf-bilan-opening-source">
+                            {acctBalance.openingSource === "auto" ? `Reportée automatiquement de ${acctBalance.openingFromExercise}` : "Saisie manuellement"}
+                          </span>
+                        </span>
+                        <span style={{ fontWeight: 700 }}>{eur(acctBalance.openingTreasury)}</span>
+                      </div>
+                      <div className="cf-bilan-line">
+                        <span>Fonds propres d'ouverture</span>
+                        <span style={{ fontWeight: 700 }}>{eur(acctBalance.openingFunds)}</span>
+                      </div>
+                      {!acctBalance.closed && (
+                        <div>
+                          <button className="cf-link" onClick={startOpeningEdit}>ajuster</button>
+                          {acctBalance.openingSource === "manual" && (
+                            <>
+                              {" · "}
+                              <button className="cf-link" disabled={openingSaving} onClick={revertOpeningToAuto}>revenir à l'automatique</button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="cf-bilan-grid">
                     <div className="cf-bilan-col">
                       <div className="cf-bilan-head">Actif</div>
-                      <div className="cf-field">
-                        <span>Trésorerie d'ouverture (€)</span>
-                        <input className="cf-input" type="number" step="0.01" value={balanceDraft.openingTreasury ?? 0}
-                          onChange={(e) => setBalanceField({ openingTreasury: e.target.value })} />
-                      </div>
                       <div className="cf-bilan-line">
                         <span>Trésorerie de clôture (calculée)</span>
-                        <span style={{ fontWeight: 700 }}>{eur(acctBilan.closingTreasury)}</span>
+                        <span style={{ fontWeight: 700 }}>{eur(acctBalance.closingTreasury)}</span>
                       </div>
                       <span className="cf-field-label" style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "#7a6f63", marginTop: 6, fontWeight: 700 }}>
                         Compléments d'actif
                       </span>
                       {(balanceDraft.manualAssets || []).map((l, idx) => (
                         <div className="cf-bilan-manual-row" key={idx}>
-                          <input className="lab2" placeholder="ex. Matériel, créances…" value={l.label}
+                          <input className="lab2" placeholder="ex. Matériel, créances…" value={l.label} disabled={acctBalance.closed}
                             onChange={(e) => updateManualLine("manualAssets", idx, { label: e.target.value })} />
-                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount}
+                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount} disabled={acctBalance.closed}
                             onChange={(e) => updateManualLine("manualAssets", idx, { amount: e.target.value })} />
-                          <button className="cf-act" aria-label="Retirer la ligne" onClick={() => removeManualLine("manualAssets", idx)}><X size={13} /></button>
+                          <button className="cf-act" aria-label="Retirer la ligne" disabled={acctBalance.closed} onClick={() => removeManualLine("manualAssets", idx)}><X size={13} /></button>
                         </div>
                       ))}
-                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => addManualLine("manualAssets")}>
+                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} disabled={acctBalance.closed} onClick={() => addManualLine("manualAssets")}>
                         <Plus size={14} /> Ajouter une ligne
                       </button>
-                      <div className="cf-bilan-total"><span>Total actif</span><span>{eur(acctBilan.totalActif)}</span></div>
+                      <div className="cf-bilan-total"><span>Total actif</span><span>{eur(acctBilanPreview.totalActif)}</span></div>
                     </div>
 
                     <div className="cf-bilan-col">
                       <div className="cf-bilan-head">Passif</div>
-                      <div className="cf-field">
-                        <span>Fonds propres reportés (€)</span>
-                        <input className="cf-input" type="number" step="0.01" value={balanceDraft.openingFunds ?? 0}
-                          onChange={(e) => setBalanceField({ openingFunds: e.target.value })} />
-                      </div>
                       <div className="cf-bilan-line">
                         <span>Résultat de l'exercice (repris)</span>
-                        <span style={{ fontWeight: 700, color: acctBilan.net >= 0 ? "#3F7A4E" : "#BB322C" }}>
-                          {acctBilan.net > 0 ? "+" : ""}{eur(acctBilan.net)}
+                        <span style={{ fontWeight: 700, color: acctBalance.net >= 0 ? "#3F7A4E" : "#BB322C" }}>
+                          {acctBalance.net > 0 ? "+" : ""}{eur(acctBalance.net)}
                         </span>
                       </div>
                       <span className="cf-field-label" style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "#7a6f63", marginTop: 6, fontWeight: 700 }}>
@@ -1663,33 +1810,38 @@ export default function App() {
                       </span>
                       {(balanceDraft.manualLiabilities || []).map((l, idx) => (
                         <div className="cf-bilan-manual-row" key={idx}>
-                          <input className="lab2" placeholder="ex. Dettes…" value={l.label}
+                          <input className="lab2" placeholder="ex. Dettes…" value={l.label} disabled={acctBalance.closed}
                             onChange={(e) => updateManualLine("manualLiabilities", idx, { label: e.target.value })} />
-                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount}
+                          <input className="amt2" type="number" step="0.01" placeholder="0" value={l.amount} disabled={acctBalance.closed}
                             onChange={(e) => updateManualLine("manualLiabilities", idx, { amount: e.target.value })} />
-                          <button className="cf-act" aria-label="Retirer la ligne" onClick={() => removeManualLine("manualLiabilities", idx)}><X size={13} /></button>
+                          <button className="cf-act" aria-label="Retirer la ligne" disabled={acctBalance.closed} onClick={() => removeManualLine("manualLiabilities", idx)}><X size={13} /></button>
                         </div>
                       ))}
-                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => addManualLine("manualLiabilities")}>
+                      <button className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }} disabled={acctBalance.closed} onClick={() => addManualLine("manualLiabilities")}>
                         <Plus size={14} /> Ajouter une ligne
                       </button>
-                      <div className="cf-bilan-total"><span>Total passif</span><span>{eur(acctBilan.totalPassif)}</span></div>
+                      <div className="cf-bilan-total"><span>Total passif</span><span>{eur(acctBilanPreview.totalPassif)}</span></div>
                     </div>
                   </div>
 
-                  <div className={"cf-balance-check " + (Math.abs(acctBilan.diff) < 0.01 ? "ok" : "off")}>
-                    {Math.abs(acctBilan.diff) < 0.01 ? (
+                  <div className={"cf-balance-check " + (Math.abs(acctBilanPreview.diff) < 0.01 ? "ok" : "off")}>
+                    {Math.abs(acctBilanPreview.diff) < 0.01 ? (
                       <><Check size={16} /> Équilibré</>
                     ) : (
-                      <><AlertTriangle size={16} /> Écart de {eur(Math.abs(acctBilan.diff))}</>
+                      <><AlertTriangle size={16} /> Écart de {eur(Math.abs(acctBilanPreview.diff))}</>
                     )}
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
-                    <button className="cf-btn cf-btn-primary" disabled={!balanceDirty || balanceSaving} onClick={saveBalanceDraft}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+                    <button className="cf-btn cf-btn-primary" disabled={!balanceDirty || balanceSaving || acctBalance.closed} onClick={saveBalanceDraft}>
                       <Check size={16} /> {balanceSaving ? "Enregistrement…" : "Enregistrer le bilan"}
                     </button>
                     {balanceDirty && <span className="cf-hint">Modifications non enregistrées</span>}
+                    {!acctBalance.closed && !acctBalance.needsFirstEntry && (
+                      <button className="cf-btn cf-btn-ghost" style={{ marginLeft: "auto" }} disabled={closingSaving} onClick={closeExercise}>
+                        <Lock size={14} /> {closingSaving ? "…" : "Clôturer l'exercice"}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1701,10 +1853,10 @@ export default function App() {
                     Le document reprend la mention « à valider par le trésorier ».
                   </p>
                   <div className="cf-export-actions">
-                    <button className="cf-btn cf-btn-primary" onClick={exportAcctPdf} disabled={!acctResult || !balanceDraft}>
+                    <button className="cf-btn cf-btn-primary" onClick={exportAcctPdf} disabled={!acctResult || !acctBalance}>
                       <FileDown size={16} /> Exporter en PDF
                     </button>
-                    <button className="cf-btn cf-btn-ghost" onClick={exportAcctCsv} disabled={!acctResult || !balanceDraft}>
+                    <button className="cf-btn cf-btn-ghost" onClick={exportAcctCsv} disabled={!acctResult || !acctBalance}>
                       <FileSpreadsheet size={16} /> Exporter en Excel/CSV
                     </button>
                   </div>
@@ -2162,7 +2314,7 @@ export default function App() {
       )}
 
       {/* feuille imprimable (PDF) : masquée à l'écran, affichée seulement à l'impression */}
-      {acctResult && balanceDraft && (
+      {acctResult && acctBalance && (
         <div className="cf-print-sheet">
           <h1>Culturafición — Comptabilité</h1>
           <h2>Exercice {globalSeasonKey}</h2>
@@ -2186,20 +2338,20 @@ export default function App() {
 
           <h2 style={{ marginTop: 20 }}>Bilan</h2>
           <h3>Actif</h3>
-          <div className="cf-print-row"><span>Trésorerie de clôture</span><span>{eur(acctBilan.closingTreasury)}</span></div>
-          {(balanceDraft.manualAssets || []).map((l, i) => (
+          <div className="cf-print-row"><span>Trésorerie de clôture</span><span>{eur(acctBalance.closingTreasury)}</span></div>
+          {(acctBalance.manualAssets || []).map((l, i) => (
             <div className="cf-print-row" key={i}><span>{l.label}</span><span>{eur(Number(l.amount) || 0)}</span></div>
           ))}
-          <div className="cf-print-row total"><span>Total actif</span><span>{eur(acctBilan.totalActif)}</span></div>
+          <div className="cf-print-row total"><span>Total actif</span><span>{eur(acctBalance.totalActif)}</span></div>
           <h3>Passif</h3>
-          <div className="cf-print-row"><span>Fonds propres reportés</span><span>{eur(Number(balanceDraft.openingFunds) || 0)}</span></div>
+          <div className="cf-print-row"><span>Fonds propres reportés</span><span>{eur(Number(acctBalance.openingFunds) || 0)}</span></div>
           <div className="cf-print-row"><span>Résultat de l'exercice</span><span>{eur(acctResult.net)}</span></div>
-          {(balanceDraft.manualLiabilities || []).map((l, i) => (
+          {(acctBalance.manualLiabilities || []).map((l, i) => (
             <div className="cf-print-row" key={i}><span>{l.label}</span><span>{eur(Number(l.amount) || 0)}</span></div>
           ))}
-          <div className="cf-print-row total"><span>Total passif</span><span>{eur(acctBilan.totalPassif)}</span></div>
+          <div className="cf-print-row total"><span>Total passif</span><span>{eur(acctBalance.totalPassif)}</span></div>
           <p style={{ marginTop: 14, fontWeight: 700 }}>
-            {Math.abs(acctBilan.diff) < 0.01 ? "Équilibré" : `Écart de ${eur(Math.abs(acctBilan.diff))}`}
+            {Math.abs(acctBalance.diff) < 0.01 ? "Équilibré" : `Écart de ${eur(Math.abs(acctBalance.diff))}`}
           </p>
         </div>
       )}

@@ -104,4 +104,6 @@ export const api = {
   getAcctResult: (exercise) => request(`/api/accounting/result?exercise=${encodeURIComponent(exercise)}`),
   getAcctBalance: (exercise) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`),
   updateAcctBalance: (exercise, patch) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`, { method: "PUT", body: patch }),
+  closeAcctExercise: (exercise) => request(`/api/accounting/close?exercise=${encodeURIComponent(exercise)}`, { method: "POST" }),
+  reopenAcctExercise: (exercise) => request(`/api/accounting/reopen?exercise=${encodeURIComponent(exercise)}`, { method: "POST" }),
 };

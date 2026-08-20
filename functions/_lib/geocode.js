@@ -4,8 +4,15 @@
 // seconde imposée par les conditions d'utilisation de Nominatim.
 const COUNTRY_CODES = { france: "fr", espagne: "es" };
 
+// Délai maximum de l'appel réseau. Nominatim peut être lent ou injoignable
+// depuis les IP de Cloudflare : sans borne, la requête pourrait rester
+// bloquée jusqu'à ce que la plateforme la coupe (erreur 500). On préfère
+// abandonner la géolocalisation au bout de quelques secondes et laisser
+// l'utilisateur saisir les coordonnées à la main.
+const GEOCODE_TIMEOUT_MS = 5000;
+
 // Renvoie { latitude, longitude } si l'adresse a pu être géolocalisée,
-// ou null sinon (adresse trop vague, service indisponible, etc.).
+// ou null sinon (adresse trop vague, service indisponible, trop lent...).
 export async function geocodeAddress(address, country) {
   if (!address) return null;
   const countrycodes = COUNTRY_CODES[country];
@@ -15,9 +22,12 @@ export async function geocodeAddress(address, country) {
   url.searchParams.set("limit", "1");
   if (countrycodes) url.searchParams.set("countrycodes", countrycodes);
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEOCODE_TIMEOUT_MS);
   try {
     const res = await fetch(url.toString(), {
       headers: { "User-Agent": "Culturaficion-App/1.0" },
+      signal: controller.signal,
     });
     if (!res.ok) return null;
     const results = await res.json();
@@ -27,6 +37,10 @@ export async function geocodeAddress(address, country) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
     return { latitude: lat, longitude: lon };
   } catch {
+    // Échec réseau, réponse non-JSON, ou délai dépassé (AbortError) :
+    // dans tous les cas on renvoie null pour ne jamais bloquer la sauvegarde.
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }

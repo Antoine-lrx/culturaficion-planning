@@ -207,7 +207,7 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
 
       {error && <div className="cf-note error">{error}</div>}
 
-      <div ref={mapElRef} className="cf-ganad-map" />
+      <div ref={mapElRef} className="cf-ganad-map" style={{ position: "relative", zIndex: 0 }} />
 
       <div className="cf-legend">
         {GANAD_STATUS_KEYS.map((k) => (

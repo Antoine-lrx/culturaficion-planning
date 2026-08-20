@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
   Users, Wallet, Scale, Lock, Unlock, Loader2, Home, Search, MapPin, List,
   Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
-  ReceiptText, Eye, EyeOff, BookOpen,
+  ReceiptText, Eye, EyeOff, BookOpen, Menu,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 
@@ -27,6 +27,14 @@ const DEFAULT_CATS = [
 ];
 
 const NEW_CAT_COLORS = ["#9E5BA8", "#C77F1A", "#5E7D8A", "#A23E5C", "#3F6E55", "#7A6FB0"];
+
+const NAV_ITEMS = [
+  { id: "accueil",   label: "Accueil",       Icon: Home },
+  { id: "liste",     label: "Liste",         Icon: List },
+  { id: "frise",     label: "Frise",         Icon: CalendarDays },
+  { id: "adhesions", label: "Adhésions",     Icon: Users },
+  { id: "compta",    label: "Comptabilité",  Icon: Landmark },
+];
 
 const MEMBERSHIP_TYPES = {
   tendido:   { label: "Tendido",   color: "#BB322C" },
@@ -101,7 +109,7 @@ html, body{
 .cf-root *{box-sizing:border-box}
 .cf-display{font-family:'Bebas Neue',sans-serif;letter-spacing:.02em;font-weight:400}
 
-.cf-top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;margin-bottom:6px}
+.cf-top{position:relative;display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;margin-bottom:6px}
 .cf-brand{display:flex;flex-direction:column;line-height:1}
 .cf-kicker{font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:var(--sangre);font-weight:600;margin-bottom:6px}
 .cf-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(38px,6vw,62px);line-height:.86;letter-spacing:.01em}
@@ -119,6 +127,14 @@ html, body{
   display:inline-flex;align-items:center;gap:6px;transition:.12s}
 .cf-vt[aria-pressed="true"]{background:var(--tinta);color:var(--albero);border-color:var(--tinta)}
 .cf-vt:hover{border-color:var(--sangre)}
+
+.cf-burgerbtn{display:none}
+.cf-navmodal-list{display:flex;flex-direction:column;gap:8px}
+.cf-navmodal-item{appearance:none;cursor:pointer;font-family:inherit;font-size:15px;font-weight:700;
+  border-radius:11px;padding:13px 16px;border:1px solid rgba(26,20,19,.16);background:var(--blanco);
+  color:var(--tinta);display:flex;align-items:center;gap:10px;width:100%;transition:.12s}
+.cf-navmodal-item[aria-pressed="true"]{background:var(--sangre);color:#fff;border-color:var(--sangre)}
+.cf-navmodal-item:hover{border-color:var(--sangre)}
 
 .cf-accueil{display:flex;justify-content:center;align-items:flex-start;min-height:min(56vh,520px);padding-top:clamp(20px,8vh,90px)}
 .cf-accueil-inner{width:min(560px,100%);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
@@ -232,11 +248,13 @@ html, body{
 .cf-count{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--tinta);letter-spacing:.04em}
 
 .cf-scrim{position:fixed;inset:0;background:rgba(26,20,19,.46);backdrop-filter:blur(2px);display:grid;place-items:center;z-index:50;padding:18px}
-.cf-modal{width:min(480px,100%);max-height:92vh;overflow:auto;background:var(--albero);border-radius:18px;
-  border:1px solid rgba(26,20,19,.16);box-shadow:0 24px 60px rgba(26,20,19,.4)}
-.cf-modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 10px}
+.cf-modal{width:min(480px,100%);max-height:92vh;overflow:hidden;background:var(--albero);border-radius:18px;
+  border:1px solid rgba(26,20,19,.16);box-shadow:0 24px 60px rgba(26,20,19,.4);
+  display:flex;flex-direction:column}
+.cf-modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 10px;flex:none}
 .cf-modal-head h3{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:.04em;margin:0}
-.cf-modal-body{padding:4px 20px 20px;display:flex;flex-direction:column;gap:14px}
+.cf-modal-body{padding:4px 20px 20px;display:flex;flex-direction:column;gap:14px;
+  overflow-y:auto;flex:1 1 auto;min-height:0}
 .cf-field{display:flex;flex-direction:column;gap:6px}
 .cf-field>span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#7a6f63;font-weight:700}
 .cf-input,.cf-select,.cf-area{font-family:inherit;font-size:14px;color:var(--tinta);background:var(--blanco);
@@ -250,7 +268,7 @@ html, body{
 .cf-pick .dot{width:10px;height:10px;border-radius:3px}
 .cf-pick[aria-pressed="true"]{border-color:var(--tinta);background:var(--tinta);color:var(--albero)}
 .cf-pick[aria-pressed="true"] .dot{outline:2px solid var(--albero);outline-offset:1px}
-.cf-modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:0 20px 20px}
+.cf-modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:0 20px 20px;flex:none}
 .cf-hint{font-size:12px;color:var(--sangre);font-weight:600}
 .cf-subhint{font-size:11.5px;color:#8a7f72;font-weight:500}
 
@@ -305,7 +323,8 @@ html, body{
   border-radius:11px;padding:10px 14px}
 .cf-memb-type{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;
   border-radius:999px;color:#fff;flex:none}
-.cf-memb-name{font-size:14px;font-weight:600;flex:1 1 auto;min-width:0}
+.cf-memb-name{font-size:14px;font-weight:600;flex:1 1 auto;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cf-memb-date{font-size:12px;color:#7a6f63;white-space:nowrap}
 .cf-memb-actions{display:flex;gap:3px;flex:none}
 
@@ -396,6 +415,18 @@ html, body{
   .cf-search-card{flex-direction:column;align-items:flex-start}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
   .cf-memb-row{flex-wrap:wrap}
+
+  .cf-top>.cf-viewtoggle{display:none}
+  .cf-burgerbtn{display:grid;place-items:center;position:absolute;top:0;right:0;
+    width:38px;height:38px;border-radius:10px;border:1px solid rgba(26,20,19,.2);
+    background:var(--blanco);color:var(--tinta);cursor:pointer;z-index:2}
+  .cf-burgerbtn:hover{border-color:var(--sangre);color:var(--sangre)}
+
+  .cf-scrim{padding:8px}
+  .cf-modal-head,.cf-modal-body,.cf-modal-foot{padding-left:12px;padding-right:12px}
+  .cf-modal-head{padding-top:12px;padding-bottom:8px}
+  .cf-modal-body{padding-top:4px;padding-bottom:12px}
+  .cf-modal-foot{padding-top:0;padding-bottom:12px}
 }
 @media (prefers-reduced-motion:reduce){.cf-root *{transition:none!important;animation:none!important}}
 .cf-root :focus-visible{outline:2px solid var(--sangre);outline-offset:2px;border-radius:6px}
@@ -417,6 +448,7 @@ export default function App() {
 
   // "accueil" (recherche rapide) | "liste" (parcours filtrable) | "frise" (planning 12 mois)
   const [view, setView] = useState("accueil");
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
   const [accueilQuery, setAccueilQuery] = useState("");
   const [listSearch, setListSearch] = useState("");
 
@@ -1164,22 +1196,15 @@ export default function App() {
           </div>
         </div>
         <div className="cf-viewtoggle">
-          <button className="cf-vt" aria-pressed={view === "accueil"} onClick={() => setView("accueil")}>
-            <Home size={14} /> Accueil
-          </button>
-          <button className="cf-vt" aria-pressed={view === "liste"} onClick={() => setView("liste")}>
-            <List size={14} /> Liste
-          </button>
-          <button className="cf-vt" aria-pressed={view === "frise"} onClick={() => setView("frise")}>
-            <CalendarDays size={14} /> Frise
-          </button>
-          <button className="cf-vt" aria-pressed={view === "adhesions"} onClick={() => setView("adhesions")}>
-            <Users size={14} /> Adhésions
-          </button>
-          <button className="cf-vt" aria-pressed={view === "compta"} onClick={() => setView("compta")}>
-            <Landmark size={14} /> Comptabilité
-          </button>
+          {NAV_ITEMS.map(({ id, label, Icon }) => (
+            <button key={id} className="cf-vt" aria-pressed={view === id} onClick={() => setView(id)}>
+              <Icon size={14} /> {label}
+            </button>
+          ))}
         </div>
+        <button className="cf-burgerbtn" aria-label="Ouvrir le menu de navigation" onClick={() => setNavMenuOpen(true)}>
+          <Menu size={20} />
+        </button>
         <div className="cf-spacer" />
         <div className={"cf-me" + (nameFlash ? " flash" : "")}>
           <label htmlFor="cf-name">Vous êtes</label>
@@ -1200,6 +1225,27 @@ export default function App() {
           </button>
         )}
       </div>
+
+      {navMenuOpen && (
+        <div className="cf-scrim" onMouseDown={(e) => e.target === e.currentTarget && setNavMenuOpen(false)}>
+          <div className="cf-modal" role="dialog" aria-modal="true">
+            <div className="cf-modal-head">
+              <h3>Navigation</h3>
+              <button className="cf-iconbtn" aria-label="Fermer" onClick={() => setNavMenuOpen(false)}><X size={16} /></button>
+            </div>
+            <div className="cf-modal-body">
+              <div className="cf-navmodal-list">
+                {NAV_ITEMS.map(({ id, label, Icon }) => (
+                  <button key={id} className="cf-navmodal-item" aria-pressed={view === id}
+                    onClick={() => { setView(id); setNavMenuOpen(false); }}>
+                    <Icon size={16} /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="cf-rule" />
 
@@ -1500,7 +1546,7 @@ export default function App() {
                   return (
                     <div className="cf-memb-row" key={m.id}>
                       <span className="cf-memb-type" style={{ background: t.color }}>{t.label}</span>
-                      <span className="cf-memb-name">{m.firstName} {m.lastName}</span>
+                      <span className="cf-memb-name" title={`${m.firstName} ${m.lastName}`}>{m.firstName} {m.lastName}</span>
                       <span className="cf-memb-date">{when || (m.joinedDate ? m.joinedDate : "—")}</span>
                       <div className="cf-memb-actions">
                         <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
@@ -1530,7 +1576,7 @@ export default function App() {
                   ) : (
                     list.map((m) => (
                       <div className="cf-nr-row" key={`${m.first_name}-${m.last_name}`}>
-                        <span className="cf-memb-name">{m.first_name} {m.last_name}</span>
+                        <span className="cf-memb-name" title={`${m.first_name} ${m.last_name}`}>{m.first_name} {m.last_name}</span>
                         <span className="cf-nr-lastseason">Dernière saison : {m.last_season}</span>
                       </div>
                     ))

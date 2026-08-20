@@ -101,6 +101,12 @@ export const api = {
   updateEntry: (id, patch) => request(`/api/accounting/entries/${encodeURIComponent(id)}`, { method: "PUT", body: patch }),
   deleteEntry: (id) => request(`/api/accounting/entries/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  listGanaderias: (country) => request(`/api/ganaderias?country=${encodeURIComponent(country)}`),
+  getGanaderia: (id) => request(`/api/ganaderias/${encodeURIComponent(id)}`),
+  createGanaderia: (g) => request("/api/ganaderias", { method: "POST", body: g }),
+  updateGanaderia: (id, patch) => request(`/api/ganaderias/${encodeURIComponent(id)}`, { method: "PUT", body: patch }),
+  deleteGanaderia: (id) => request(`/api/ganaderias/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   getAcctResult: (exercise) => request(`/api/accounting/result?exercise=${encodeURIComponent(exercise)}`),
   getAcctBalance: (exercise) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`),
   updateAcctBalance: (exercise, patch) => request(`/api/accounting/balance?exercise=${encodeURIComponent(exercise)}`, { method: "PUT", body: patch }),

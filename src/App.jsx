@@ -51,7 +51,7 @@ const STATUSES = {
 const STATUS_KEYS = Object.keys(STATUSES);
 
 const MONTHS_LONG = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
-const MONTHS_SHORT = ["JANV","FÉVR","MARS","AVR","MAI","JUIN","JUIL","AOÛ","SEPT","OCT","NOV","DÉC"];
+const MONTHS_SHORT = ["JANV","FÉVR","MARS","AVR","MAI","JUIN","JUIL","AOÛT","SEPT","OCT","NOV","DÉC"];
 
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 const NEUTRAL = { label: "—", color: "#9a8d7c" };
@@ -84,7 +84,7 @@ function fmtDate(iso) {
     return new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short" }).format(d);
   } catch { return null; }
 }
-const normalize = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const normalize = (s) => (s || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');

@@ -59,6 +59,25 @@ export function rowToEntry(row) {
   };
 }
 
+export function rowToGanaderia(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    country: row.country,
+    address: row.address,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    status: row.status,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    contactInstagram: row.contact_instagram,
+    lastContactDate: row.last_contact_date,
+    comments: row.comments,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export function safeParseArray(raw) {
   if (!raw) return [];
   try {

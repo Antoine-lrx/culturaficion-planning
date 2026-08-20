@@ -5,7 +5,7 @@ tentaderos prácticos, retransmissions, assemblée générale…), sous forme de
 frise sur 12 mois. Interface « cartel taurin » (rouge, sable, or, encre),
 partagée entre les membres du bureau via un code d'accès unique.
 
-Cinq vues, accessibles via les boutons en haut de page :
+Six vues, accessibles via les boutons en haut de page :
 - **Accueil** — recherche rapide, centrée, avec suggestions en direct ;
   cliquer sur une suggestion ouvre directement la fiche de l'événement.
 - **Liste** — tous les événements, filtrables par nom, catégorie et statut.
@@ -16,6 +16,9 @@ Cinq vues, accessibles via les boutons en haut de page :
   bilan assisté par exercice (septembre → août), avec export PDF/Excel pour
   l'assemblée générale (voir section 8). **Document de travail : assiste le
   trésorier, ne le remplace pas.**
+- **Ganaderías** — annuaire de prospection des élevages français et
+  espagnols pour les tientas de la branche Prácticos, avec carte interactive
+  par pays (voir section 9).
 
 Pas de vrai routeur d'URL — juste une bascule d'état côté client, plus
 simple et plus robuste sur de l'hébergement statique. Les trois vues
@@ -232,6 +235,10 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   `practicos`), `season_key`, `joined_date`, `created_at` (voir section 7).
 - `acct_accounts`, `acct_entries`, `acct_balance` : plan de comptes, journal
   et éléments de bilan du module Comptabilité (voir section 8).
+- `ganaderias` : `id`, `name`, `country` (`france`/`espagne`), `address`,
+  `latitude`, `longitude`, `status`, `contact_name`, `contact_phone`,
+  `contact_instagram`, `last_contact_date`, `comments`, `created_at`,
+  `updated_at` (voir section 9).
 
 Voir `migrations/0001_init.sql` pour le détail et les catégories par défaut.
 
@@ -524,3 +531,86 @@ La migration 0005 crée les tables `acct_accounts`, `acct_entries` et
 automatique (`opening_source`, `closed`, `closed_at`, `closing_treasury`,
 `closing_funds`). Aucune des deux ne touche à une table existante (`events`,
 `categories`, `meta`, `memberships`).
+
+---
+
+## 9. Page Ganaderías (annuaire de prospection)
+
+La branche Prácticos organise des tientas (séances d'entraînement) chez des
+ganaderías (élevages de taureaux de combat). Cette page centralise les
+ganaderías françaises et espagnoles connues, leur statut de contact, et les
+positionne sur une carte interactive — **accessible à tout membre du
+bureau, sans restriction de droits par profil.**
+
+### Statuts et pays
+
+- Trois statuts possibles, un seul à la fois : **à contacter** (rouge),
+  **en attente** (or), **partenaire** (vert) — mêmes couleurs que le reste
+  de l'app.
+- Deux pays : **France** et **Espagne**, chacun avec sa propre carte (pas
+  encore de vue « toutes »).
+
+### Carte interactive (gratuite, sans clé API)
+
+- **Leaflet** + fonds de carte **OpenStreetMap** (bibliothèque `leaflet`,
+  dépendance npm ajoutée au projet).
+- Chaque ganadería géolocalisée apparaît comme un cercle coloré selon son
+  statut ; cliquer dessus ouvre sa fiche détaillée. Les ganaderías sans
+  coordonnées restent visibles dans la liste, mais pas sur la carte.
+
+### Géolocalisation automatique (Nominatim)
+
+À l'ajout ou la modification d'une adresse (et en l'absence de coordonnées
+saisies à la main), le serveur interroge **Nominatim** (OpenStreetMap),
+gratuit et sans clé API, avec un `User-Agent` identifiable
+(`Culturaficion-App/1.0`). Les coordonnées obtenues sont stockées en base et
+réutilisées à chaque affichage — Nominatim n'est jamais rappelé au
+chargement de la carte.
+
+Si l'adresse ne peut pas être géolocalisée automatiquement (adresse trop
+vague, lieu-dit sans référence connue…), l'API renvoie
+`geocodingFailed: true` et l'interface affiche alors deux champs de repli
+**Latitude** / **Longitude** à saisir manuellement.
+
+### Endpoints
+
+- `GET /api/ganaderias?country=france` — liste les ganaderías d'un pays
+  (`france` ou `espagne`).
+- `GET /api/ganaderias/:id` — détail d'une ganadería.
+- `POST /api/ganaderias` — ajoute une ganadería (géolocalisation serveur si
+  une adresse est fournie sans coordonnées manuelles).
+- `PUT /api/ganaderias/:id` — modifie une ganadería (regéolocalise si
+  l'adresse a changé et qu'aucune coordonnée manuelle n'est fournie).
+- `DELETE /api/ganaderias/:id` — supprime une ganadería (RGPD : suppression
+  immédiate, sans étape supplémentaire).
+
+Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
+
+### RGPD
+
+Seules les données nécessaires à la prospection sont conservées : nom de la
+ganadería, adresse, statut, nom du contact, téléphone, Instagram,
+commentaires. Aucune donnée bancaire, aucun email, aucune adresse
+personnelle. Suppression possible à tout moment depuis l'interface. Données
+hébergées dans la même base D1 `culturaficion_planning`, déjà en juridiction
+UE.
+
+### Migration à appliquer
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0007_add_ganaderias.sql
+```
+
+> **Note** : contrairement à ce qu'on pourrait attendre du nom de la
+> commande, ce dépôt n'utilise **pas** `wrangler d1 migrations apply` (qui
+> suppose une table de suivi `d1_migrations` jamais mise en place ici) —
+> toutes les migrations précédentes (0001 à 0006) s'appliquent avec
+> `wrangler d1 execute --file=`, la commande ci-dessus suit donc la même
+> convention pour rester cohérente avec le reste du projet.
+
+Cette migration crée uniquement la nouvelle table `ganaderias` et ses index,
+sans toucher à aucune table existante (`events`, `categories`, `meta`,
+`memberships`, `acct_accounts`, `acct_entries`, `acct_balance`).
+
+Aucune nouvelle variable d'environnement n'est nécessaire : Nominatim ne
+requiert pas de clé API.

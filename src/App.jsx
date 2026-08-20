@@ -4,9 +4,10 @@ import {
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
   Users, Wallet, Scale, Lock, Unlock, Loader2, Home, Search, MapPin, List,
   Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
-  ReceiptText, Eye, EyeOff, BookOpen, Menu,
+  ReceiptText, Eye, EyeOff, BookOpen, Menu, Beef,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
+import Ganaderias from "./Ganaderias.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    Culturafición · Frise de la saison
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { id: "frise",     label: "Frise",         Icon: CalendarDays },
   { id: "adhesions", label: "Adhésions",     Icon: Users },
   { id: "compta",    label: "Comptabilité",  Icon: Landmark },
+  { id: "ganaderias", label: "Ganaderías",   Icon: Beef },
 ];
 
 const MEMBERSHIP_TYPES = {
@@ -82,7 +84,10 @@ function fmtDate(iso) {
     return new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short" }).format(d);
   } catch { return null; }
 }
-const normalize = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function stripDiacritics(str) {
+  return str.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+const normalize = (s) => stripDiacritics(s || "").toLowerCase();
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
@@ -171,6 +176,12 @@ html, body{
 .cf-search-card-stats{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px;font-weight:600;color:#7a6f63}
 .cf-search-card-stats .pos{color:#3F7A4E}
 .cf-search-card-stats .neg{color:#BB322C}
+.cf-search-card:hover .cf-card-actions,.cf-search-card:focus-within .cf-card-actions{opacity:1}
+
+.cf-ganad-map{width:100%;height:min(46vh,420px);min-height:260px;border-radius:14px;overflow:hidden;
+  border:1px solid rgba(26,20,19,.16);margin:10px 0;background:var(--blanco)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--blanco);color:var(--tinta);font-family:'Inter',system-ui,sans-serif}
+.leaflet-tooltip{font-family:'Inter',system-ui,sans-serif;font-size:12px;font-weight:600}
 
 .cf-me{display:flex;align-items:center;gap:8px;background:var(--blanco);border:1px solid rgba(26,20,19,.16);
   border-radius:999px;padding:5px 6px 5px 14px}
@@ -498,6 +509,10 @@ export default function App() {
   const [entryModal, setEntryModal] = useState(null);
   const [acctAccountsModal, setAcctAccountsModal] = useState(false);
   const [newAcctAccount, setNewAcctAccount] = useState({ code: "", label: "", kind: "produit" });
+
+  // Ganaderías : annuaire de prospection (branche Prácticos), géré par son
+  // propre composant — App ne fait que déclencher son rechargement manuel.
+  const [ganadRefresh, setGanadRefresh] = useState(0);
 
   // Le début de saison est fixé en septembre partout dans l'app (Frise et
   // Adhésions partagent la même notion de saison) : startMonth n'est plus
@@ -1215,11 +1230,12 @@ export default function App() {
             loadState();
             if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); }
             if (view === "compta") loadAcctAll(globalSeasonKey);
+            if (view === "ganaderias") setGanadRefresh((n) => n + 1);
           }}
           title="Récupérer les ajouts des autres membres">
           <RefreshCw size={15} /> Rafraîchir
         </button>
-        {view !== "adhesions" && view !== "compta" && (
+        {view !== "adhesions" && view !== "compta" && view !== "ganaderias" && (
           <button className="cf-btn cf-btn-primary" onClick={() => openAdd()}>
             <Plus size={17} /> Ajouter un événement
           </button>
@@ -1911,6 +1927,13 @@ export default function App() {
             </>
           )}
         </div>
+      )}
+
+      {view === "ganaderias" && (
+        <Ganaderias
+          refreshKey={ganadRefresh}
+          onUnauthorized={() => { clearCode(); setAuthState("needed"); }}
+        />
       )}
 
       {/* membership modal */}

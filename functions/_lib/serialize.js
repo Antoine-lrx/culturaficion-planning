@@ -65,6 +65,7 @@ export function rowToGanaderia(row) {
     name: row.name,
     country: row.country,
     address: row.address,
+    city: row.city ?? null,
     latitude: row.latitude,
     longitude: row.longitude,
     status: row.status,

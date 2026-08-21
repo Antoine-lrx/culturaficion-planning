@@ -37,7 +37,7 @@ export async function onRequestPost({ request, env }) {
   }
 
   const {
-    id, name, country, address, status, contactName, contactPhone,
+    id, name, country, address, city, status, contactName, contactPhone,
     contactInstagram, lastContactDate, comments,
   } = body || {};
   let { latitude, longitude } = body || {};
@@ -53,6 +53,11 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "Statut invalide." }, { status: 400 });
   }
 
+  // Une ganadería peut être enregistrée avec ou sans coordonnées : si la
+  // géolocalisation échoue, latitude/longitude restent à null et la
+  // sauvegarde aboutit quand même (l'utilisateur pourra positionner le
+  // marqueur à la main ensuite).
+  let finalCity = typeof city === "string" && city.trim() ? city.trim() : null;
   let geocodingFailed = false;
   const hasManualCoords = latitude != null && longitude != null && latitude !== "" && longitude !== "";
   if (address && !hasManualCoords) {
@@ -60,6 +65,7 @@ export async function onRequestPost({ request, env }) {
     if (geo) {
       latitude = geo.latitude;
       longitude = geo.longitude;
+      if (!finalCity && geo.city) finalCity = geo.city;
     } else {
       latitude = null;
       longitude = null;
@@ -70,16 +76,27 @@ export async function onRequestPost({ request, env }) {
     longitude = null;
   }
 
-  const now = Date.now();
-  await env.DB.prepare(
-    `INSERT INTO ganaderias (id, name, country, address, latitude, longitude, status, contact_name, contact_phone, contact_instagram, last_contact_date, comments, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    id, name.trim(), country, address || null,
-    latitude != null ? Number(latitude) : null, longitude != null ? Number(longitude) : null,
-    finalStatus, contactName || null, contactPhone || null, contactInstagram || null,
-    lastContactDate || null, comments || null, now, now
-  ).run();
+  try {
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO ganaderias (id, name, country, address, city, latitude, longitude, status, contact_name, contact_phone, contact_instagram, last_contact_date, comments, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id, name.trim(), country, address || null, finalCity,
+      latitude != null ? Number(latitude) : null, longitude != null ? Number(longitude) : null,
+      finalStatus, contactName || null, contactPhone || null, contactInstagram || null,
+      lastContactDate || null, comments || null, now, now
+    ).run();
+  } catch (e) {
+    // Cas le plus fréquent : l'id existe déjà (l'enregistrement a en fait
+    // réussi lors d'une première tentative). On renvoie un 409 explicite au
+    // lieu d'un 500 opaque, pour que le frontend bascule sur une mise à jour.
+    const msg = String(e && e.message || e);
+    if (/UNIQUE|PRIMARY KEY|constraint/i.test(msg)) {
+      return json({ error: "Cette ganadería existe déjà. Rechargez la liste puis modifiez-la." }, { status: 409 });
+    }
+    return json({ error: "Enregistrement impossible : " + msg }, { status: 500 });
+  }
 
   const row = await env.DB.prepare("SELECT * FROM ganaderias WHERE id = ?").bind(id).first();
   const result = rowToGanaderia(row);

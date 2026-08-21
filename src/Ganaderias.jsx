@@ -38,10 +38,77 @@ function fmtDate(iso) {
 
 function emptyDraft(country) {
   return {
-    id: uid(), name: "", country, status: "a_contacter", address: "",
+    id: uid(), name: "", country, status: "a_contacter", address: "", city: "",
     latitude: "", longitude: "", contactName: "", contactPhone: "",
     contactInstagram: "", lastContactDate: "", comments: "",
   };
+}
+
+// Marqueur rouge « cartel taurin » pour le sélecteur de position.
+const GANAD_PIN = L.divIcon({
+  className: "cf-pin-icon",
+  html: '<span class="cf-pin-dot"></span>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+
+/* Petite carte de sélection manuelle de position (Correction 2).
+   Ouverte dans la modale : l'utilisateur clique ou fait glisser le marqueur,
+   les coordonnées s'affichent en direct, puis « Valider » les renvoie au
+   formulaire. Réutilise la même bibliothèque Leaflet que le reste de la page. */
+function MapPicker({ initial, country, onValidate, onCancel }) {
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const hasInit = initial && Number.isFinite(initial.lat) && Number.isFinite(initial.lng);
+  const [coords, setCoords] = useState(hasInit ? { lat: initial.lat, lng: initial.lng } : null);
+
+  useEffect(() => {
+    if (!elRef.current || mapRef.current) return;
+    const def = GANAD_COUNTRIES.find((c) => c.id === country) || GANAD_COUNTRIES[1];
+    const start = hasInit ? [initial.lat, initial.lng] : def.center;
+    const zoom = hasInit ? 12 : def.zoom;
+
+    const map = L.map(elRef.current, { scrollWheelZoom: true }).setView(start, zoom);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
+      maxZoom: 18,
+    }).addTo(map);
+
+    const marker = L.marker(start, { draggable: true, icon: GANAD_PIN, keyboard: false }).addTo(map);
+    setCoords({ lat: start[0], lng: start[1] });
+    marker.on("dragend", () => {
+      const p = marker.getLatLng();
+      setCoords({ lat: p.lat, lng: p.lng });
+    });
+    map.on("click", (e) => {
+      marker.setLatLng(e.latlng);
+      setCoords({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+    mapRef.current = map;
+    // Carte montée dans une modale : recalcul de taille après stabilisation
+    // du layout, sinon les tuiles s'affichent de travers.
+    const t = setTimeout(() => map.invalidateSize(), 80);
+    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="cf-mappicker">
+      <div ref={elRef} className="cf-mappicker-map" />
+      <div className="cf-mappicker-coords">
+        {coords
+          ? `Lat : ${coords.lat.toFixed(4)}, Lng : ${coords.lng.toFixed(4)}`
+          : "Cliquez sur la carte pour placer le marqueur."}
+      </div>
+      <div className="cf-mappicker-actions">
+        <button type="button" className="cf-btn cf-btn-ghost" onClick={onCancel}>Annuler</button>
+        <button type="button" className="cf-btn cf-btn-primary"
+          onClick={() => coords && onValidate(coords)} disabled={!coords}>
+          <Check size={15} /> Valider cette position
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function Ganaderias({ onUnauthorized, refreshKey }) {
@@ -128,7 +195,7 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
       ...g,
       latitude: g.latitude != null ? String(g.latitude) : "",
       longitude: g.longitude != null ? String(g.longitude) : "",
-      address: g.address || "", contactName: g.contactName || "", contactPhone: g.contactPhone || "",
+      address: g.address || "", city: g.city || "", contactName: g.contactName || "", contactPhone: g.contactPhone || "",
       contactInstagram: g.contactInstagram || "", lastContactDate: g.lastContactDate || "", comments: g.comments || "",
     },
     geoFailed: Boolean(g.address) && g.latitude == null,
@@ -137,20 +204,20 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
   const submitModal = async () => {
     const d = modal.draft;
     if (!d.name.trim() || !d.country || !d.status) return;
-    const manualLat = d.latitude !== "" ? Number(d.latitude) : null;
-    const manualLng = d.longitude !== "" ? Number(d.longitude) : null;
-    if ((d.latitude !== "" && !Number.isFinite(manualLat)) || (d.longitude !== "" && !Number.isFinite(manualLng))) return;
+    const manualLat = d.latitude !== "" && d.latitude != null ? Number(d.latitude) : null;
+    const manualLng = d.longitude !== "" && d.longitude != null ? Number(d.longitude) : null;
 
     const payload = {
       name: d.name.trim(), country: d.country, status: d.status,
       address: d.address.trim() || null,
+      city: d.city.trim() || null,
       contactName: d.contactName.trim() || null,
       contactPhone: d.contactPhone.trim() || null,
       contactInstagram: d.contactInstagram.trim().replace(/^@+/, "") || null,
       lastContactDate: d.lastContactDate || null,
       comments: d.comments.trim() || null,
     };
-    if (manualLat != null && manualLng != null) {
+    if (manualLat != null && Number.isFinite(manualLat) && manualLng != null && Number.isFinite(manualLng)) {
       payload.latitude = manualLat;
       payload.longitude = manualLng;
     }
@@ -161,12 +228,31 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
         ? await api.createGanaderia({ id: d.id, ...payload })
         : await api.updateGanaderia(d.id, payload);
 
+      // À ce stade, la ganadería EST enregistrée en base (même si l'adresse
+      // n'a pas pu être géolocalisée). On rafraîchit la liste pour la montrer.
+      loadList(country);
+
       if (saved.geocodingFailed) {
-        setModal((m) => ({ ...m, geoFailed: true, draft: { ...m.draft, latitude: "", longitude: "" } }));
+        // Enregistrement réussi mais adresse non reconnue : on garde la modale
+        // ouverte en mode « édition » — ainsi toute nouvelle sauvegarde est un
+        // PUT (jamais un second POST sur le même id, qui provoquait le 500) —
+        // et on invite à placer la position à la main sur la carte.
+        setModal((m) => ({
+          ...m,
+          mode: "edit",
+          geoFailed: true,
+          pickerOpen: false,
+          draft: {
+            ...m.draft,
+            id: saved.id,
+            city: saved.city || m.draft.city,
+            latitude: saved.latitude != null ? String(saved.latitude) : "",
+            longitude: saved.longitude != null ? String(saved.longitude) : "",
+          },
+        }));
         return;
       }
       setModal(null);
-      loadList(country);
     } catch (e) {
       alert("Erreur : " + e.message);
     } finally {
@@ -186,7 +272,9 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
   };
 
   const detailGanaderia = ganaderias.find((g) => g.id === detailId) || null;
-  const showManualCoords = Boolean(modal) && (!modal.draft.address.trim() || modal.geoFailed);
+  const hasCoords = Boolean(modal)
+    && modal.draft.latitude !== "" && modal.draft.longitude !== ""
+    && Number.isFinite(Number(modal.draft.latitude)) && Number.isFinite(Number(modal.draft.longitude));
 
   return (
     <div className="cf-home">
@@ -255,18 +343,21 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
             {filtered.map((g) => {
               const st = GANAD_STATUSES[g.status] || GANAD_STATUSES.a_contacter;
               const when = fmtDate(g.lastContactDate);
+              const region = g.country === "france" ? "France" : "España";
+              const place = [g.city, region].filter(Boolean).join(" · ");
               return (
-                <div className="cf-search-card" key={g.id} tabIndex={0} role="button"
+                <div className="cf-search-card cf-ganad-card" key={g.id} tabIndex={0} role="button"
                   aria-label={"Ouvrir la fiche : " + g.name}
                   onClick={() => setDetailId(g.id)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailId(g.id); } }}>
                   <span className="stripe" style={{ background: st.color }} />
                   <div className="cf-search-card-main">
                     <div className="cf-card-title">{g.name}</div>
+                    <div className="cf-ganad-loc"><MapPin size={12} /> {place}</div>
                     <div className="cf-card-meta">
                       <span className="cf-pill" style={{ color: st.color }}>{st.label}</span>
                       {g.contactName && <span>{g.contactName}</span>}
-                      {when && <span className="when"><CalendarDays size={12} /> Dernier contact : {when}</span>}
+                      {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
                     </div>
                   </div>
                   <div className="cf-card-actions">
@@ -294,7 +385,7 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
             </div>
             <div className="cf-modal-body">
               <div className="cf-detail-meta">
-                <span>{detailGanaderia.country === "france" ? "France" : "España"}</span>
+                <span>{[detailGanaderia.city, detailGanaderia.country === "france" ? "France" : "España"].filter(Boolean).join(" · ")}</span>
                 <span className="cf-pill" style={{ color: (GANAD_STATUSES[detailGanaderia.status] || {}).color }}>
                   {(GANAD_STATUSES[detailGanaderia.status] || {}).label}
                 </span>
@@ -390,39 +481,62 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
                 </div>
               </div>
 
-              <label className="cf-field">
-                <span>Adresse (facultatif)</span>
-                <input className="cf-input" value={modal.draft.address}
-                  placeholder="ex. Finca El Retamar, 41710 Utrera, Espagne"
-                  onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, address: e.target.value }, geoFailed: false }))} />
-              </label>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label className="cf-field" style={{ flex: "2 1 220px" }}>
+                  <span>Adresse (facultatif)</span>
+                  <input className="cf-input" value={modal.draft.address}
+                    placeholder="ex. Finca El Retamar, 41710 Utrera, Espagne"
+                    onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, address: e.target.value }, geoFailed: false }))} />
+                </label>
+                <label className="cf-field" style={{ flex: "1 1 130px" }}>
+                  <span>Ville (facultatif)</span>
+                  <input className="cf-input" value={modal.draft.city}
+                    placeholder="ex. Utrera"
+                    onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, city: e.target.value } }))} />
+                </label>
+              </div>
 
-              {showManualCoords && (
-                <>
-                  {modal.geoFailed && (
-                    <div className="cf-note error">
-                      L'adresse n'a pas pu être géolocalisée automatiquement. Tu peux saisir les coordonnées
-                      manuellement (latitude / longitude) pour que la ganadería apparaisse sur la carte.
-                    </div>
-                  )}
-                  <span className="cf-subhint">
-                    Coordonnées GPS facultatives — utile si l'adresse est introuvable automatiquement, pour
-                    que la ganadería apparaisse quand même sur la carte.
-                  </span>
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                    <label className="cf-field" style={{ flex: "1 1 140px" }}>
-                      <span>Latitude</span>
-                      <input className="cf-input" type="number" step="any" value={modal.draft.latitude}
-                        onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, latitude: e.target.value } }))} />
-                    </label>
-                    <label className="cf-field" style={{ flex: "1 1 140px" }}>
-                      <span>Longitude</span>
-                      <input className="cf-input" type="number" step="any" value={modal.draft.longitude}
-                        onChange={(e) => setModal((m) => ({ ...m, draft: { ...m.draft, longitude: e.target.value } }))} />
-                    </label>
+              {/* Sélecteur de position sur la carte (Correction 2). La
+                  géolocalisation reste automatique à partir de l'adresse ; ce
+                  bouton permet de corriger ou, si l'adresse est introuvable,
+                  de placer le marqueur à la main. */}
+              <div className="cf-field">
+                <span>Position sur la carte</span>
+                {modal.geoFailed && (
+                  <div className="cf-note error" style={{ margin: "0 0 2px" }}>
+                    L'adresse n'a pas pu être géolocalisée automatiquement, mais la ganadería est
+                    bien enregistrée. Placez son emplacement à la main sur la carte ci-dessous pour
+                    qu'elle apparaisse parmi les marqueurs.
                   </div>
-                </>
-              )}
+                )}
+                {modal.pickerOpen ? (
+                  <MapPicker
+                    country={modal.draft.country}
+                    initial={hasCoords
+                      ? { lat: Number(modal.draft.latitude), lng: Number(modal.draft.longitude) }
+                      : null}
+                    onValidate={(coords) => setModal((m) => ({
+                      ...m,
+                      pickerOpen: false,
+                      geoFailed: false,
+                      draft: { ...m.draft, latitude: String(coords.lat), longitude: String(coords.lng) },
+                    }))}
+                    onCancel={() => setModal((m) => ({ ...m, pickerOpen: false }))}
+                  />
+                ) : (
+                  <>
+                    <button type="button" className="cf-btn cf-btn-ghost" style={{ alignSelf: "flex-start" }}
+                      onClick={() => setModal((m) => ({ ...m, pickerOpen: true }))}>
+                      <MapPin size={15} /> Ajuster la position sur la carte
+                    </button>
+                    <span className="cf-subhint">
+                      {hasCoords
+                        ? `Position définie — Lat : ${Number(modal.draft.latitude).toFixed(4)}, Lng : ${Number(modal.draft.longitude).toFixed(4)}`
+                        : "Aucune position définie. Renseignez une adresse pour un placement automatique, ou placez le marqueur à la main."}
+                    </span>
+                  </>
+                )}
+              </div>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 <label className="cf-field" style={{ flex: "1 1 150px" }}>

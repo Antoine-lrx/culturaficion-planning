@@ -41,6 +41,7 @@ export async function onRequestPut({ request, env, params }) {
     name: body.name !== undefined ? String(body.name).trim() : existing.name,
     country: body.country ?? existing.country,
     address: body.address !== undefined ? body.address : existing.address,
+    city: body.city !== undefined ? (body.city || null) : existing.city,
     status: body.status ?? existing.status,
     contactName: body.contactName !== undefined ? body.contactName : existing.contact_name,
     contactPhone: body.contactPhone !== undefined ? body.contactPhone : existing.contact_phone,
@@ -56,6 +57,9 @@ export async function onRequestPut({ request, env, params }) {
   const manualCoordsProvided = body.latitude !== undefined && body.longitude !== undefined
     && body.latitude !== null && body.longitude !== null && body.latitude !== "" && body.longitude !== "";
   const addressChanged = body.address !== undefined && body.address !== existing.address;
+  // La ville n'est ré-interrogée automatiquement que si l'adresse change et
+  // que le client n'a pas fourni de ville explicite.
+  const cityProvided = body.city !== undefined;
 
   if (manualCoordsProvided) {
     latitude = Number(body.latitude);
@@ -66,6 +70,7 @@ export async function onRequestPut({ request, env, params }) {
       if (geo) {
         latitude = geo.latitude;
         longitude = geo.longitude;
+        if (!cityProvided && geo.city) merged.city = geo.city;
       } else {
         latitude = null;
         longitude = null;
@@ -77,14 +82,18 @@ export async function onRequestPut({ request, env, params }) {
     }
   }
 
-  await env.DB.prepare(
-    `UPDATE ganaderias SET name=?, country=?, address=?, latitude=?, longitude=?, status=?, contact_name=?, contact_phone=?, contact_instagram=?, last_contact_date=?, comments=?, updated_at=?
-     WHERE id=?`
-  ).bind(
-    merged.name, merged.country, merged.address, latitude, longitude, merged.status,
-    merged.contactName, merged.contactPhone, merged.contactInstagram, merged.lastContactDate,
-    merged.comments, Date.now(), id
-  ).run();
+  try {
+    await env.DB.prepare(
+      `UPDATE ganaderias SET name=?, country=?, address=?, city=?, latitude=?, longitude=?, status=?, contact_name=?, contact_phone=?, contact_instagram=?, last_contact_date=?, comments=?, updated_at=?
+       WHERE id=?`
+    ).bind(
+      merged.name, merged.country, merged.address, merged.city, latitude, longitude, merged.status,
+      merged.contactName, merged.contactPhone, merged.contactInstagram, merged.lastContactDate,
+      merged.comments, Date.now(), id
+    ).run();
+  } catch (e) {
+    return json({ error: "Mise à jour impossible : " + String(e && e.message || e) }, { status: 500 });
+  }
 
   const row = await env.DB.prepare("SELECT * FROM ganaderias WHERE id = ?").bind(id).first();
   const result = rowToGanaderia(row);

@@ -11,8 +11,10 @@ const COUNTRY_CODES = { france: "fr", espagne: "es" };
 // l'utilisateur saisir les coordonnées à la main.
 const GEOCODE_TIMEOUT_MS = 5000;
 
-// Renvoie { latitude, longitude } si l'adresse a pu être géolocalisée,
+// Renvoie { latitude, longitude, city } si l'adresse a pu être géolocalisée,
 // ou null sinon (adresse trop vague, service indisponible, trop lent...).
+// `city` peut être null même en cas de succès si Nominatim ne renvoie pas de
+// ville exploitable pour l'adresse fournie.
 export async function geocodeAddress(address, country) {
   if (!address) return null;
   const countrycodes = COUNTRY_CODES[country];
@@ -20,6 +22,9 @@ export async function geocodeAddress(address, country) {
   url.searchParams.set("q", address);
   url.searchParams.set("format", "json");
   url.searchParams.set("limit", "1");
+  // addressdetails=1 : demande à Nominatim de détailler les composants de
+  // l'adresse (ville, village...) pour pré-remplir le champ `city`.
+  url.searchParams.set("addressdetails", "1");
   if (countrycodes) url.searchParams.set("countrycodes", countrycodes);
 
   const controller = new AbortController();
@@ -35,7 +40,9 @@ export async function geocodeAddress(address, country) {
     const lat = Number(results[0].lat);
     const lon = Number(results[0].lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    return { latitude: lat, longitude: lon };
+    const addr = results[0].address || {};
+    const city = addr.city || addr.town || addr.village || addr.municipality || null;
+    return { latitude: lat, longitude: lon, city };
   } catch {
     // Échec réseau, réponse non-JSON, ou délai dépassé (AbortError) :
     // dans tous les cas on renvoie null pour ne jamais bloquer la sauvegarde.

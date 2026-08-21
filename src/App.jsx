@@ -183,6 +183,23 @@ html, body{
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--blanco);color:var(--tinta);font-family:'Inter',system-ui,sans-serif}
 .leaflet-tooltip{font-family:'Inter',system-ui,sans-serif;font-size:12px;font-weight:600}
 
+/* Ganaderías : ligne ville/région sur les tuiles + tuiles compactes */
+.cf-ganad-loc{font-size:12px;color:#7a6f63;display:inline-flex;align-items:center;gap:4px;margin:1px 0 5px;font-weight:600}
+.cf-ganad-loc svg{color:#9a8d7c;flex:none}
+.cf-ganad-card .cf-card-title{margin-bottom:2px}
+.cf-ganad-card .cf-card-meta{margin-bottom:0}
+
+/* Sélecteur de position manuelle (petite carte dans la modale) */
+.cf-mappicker{display:flex;flex-direction:column;gap:8px;margin-top:2px}
+.cf-mappicker-map{width:100%;height:280px;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(26,20,19,.18);background:var(--blanco)}
+.cf-mappicker-coords{font-size:12.5px;font-weight:600;color:var(--tinta);
+  background:rgba(184,134,46,.12);border:1px solid rgba(184,134,46,.3);border-radius:8px;padding:6px 10px}
+.cf-mappicker-actions{display:flex;gap:8px;justify-content:flex-end}
+.cf-pin-icon{background:none;border:0}
+.cf-pin-dot{display:block;width:18px;height:18px;border-radius:50%;background:#BB322C;
+  border:2px solid #1A1413;box-shadow:0 1px 3px rgba(26,20,19,.5)}
+
 .cf-me{display:flex;align-items:center;gap:8px;background:var(--blanco);border:1px solid rgba(26,20,19,.16);
   border-radius:999px;padding:5px 6px 5px 14px}
 .cf-me label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#7a6f63;white-space:nowrap}
@@ -424,6 +441,12 @@ html, body{
   .cf-me input{width:96px}
   .cf-statusfilter{margin-left:0}
   .cf-search-card{flex-direction:column;align-items:flex-start}
+  /* Tuiles ganaderías compactes sur mobile : moins de padding, hauteur
+     libre, ville affichée, actions (modifier/supprimer) toujours visibles. */
+  .cf-ganad-card{padding:9px 12px 9px 16px;gap:2px}
+  .cf-ganad-card .cf-card-title{font-size:13.5px;padding-right:60px}
+  .cf-ganad-card .cf-ganad-loc{margin:0 0 3px;font-size:11.5px}
+  .cf-ganad-card .cf-card-actions{opacity:1;top:8px;right:8px}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
   .cf-memb-row{flex-wrap:wrap}
 

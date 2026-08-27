@@ -42,6 +42,9 @@ export function rowToAccount(row) {
     autoSource: row.auto_source,
     position: row.position,
     hidden: !!row.hidden,
+    // `extra` = poste-constante du plan standard, absent de la base : non
+    // modifiable/supprimable via l'API (aucune ligne en base à mettre à jour).
+    extra: !!row.extra,
   };
 }
 

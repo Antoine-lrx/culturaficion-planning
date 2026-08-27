@@ -1,6 +1,107 @@
 // Helpers partagés par les endpoints /api/accounting/*.
 import { safeParseArray } from "./serialize.js";
 
+// Postes du plan comptable associatif standard (classes 6 et 7) absents de la
+// base historique. Ils vivent en constantes de code — aucune migration SQL —
+// et complètent le plan à l'affichage comme à la saisie : un poste-constante
+// n'apparaît en base (acct_entries) que le jour où une écriture le référence.
+export const EXTRA_ACCOUNTS = [
+  // Produits (classe 7)
+  { code: "7135", label: "Variation des stocks de produits",             kind: "produit" },
+  { code: "7561", label: "Cotisations sans contrepartie (art. 200 CGI)", kind: "produit" },
+  { code: "77",   label: "Produits exceptionnels",                       kind: "produit" },
+  { code: "78",   label: "Reprises sur amortissements et provisions",    kind: "produit" },
+  { code: "79",   label: "Transfert de charges",                         kind: "produit" },
+  // Charges (classe 6)
+  { code: "6037", label: "Variation des stocks de marchandises",         kind: "charge" },
+  { code: "611",  label: "Locations mobilières et immobilières",         kind: "charge" },
+  { code: "6260", label: "Frais postaux et de télécommunications",       kind: "charge" },
+  { code: "63",   label: "Impôts et taxes",                              kind: "charge" },
+  { code: "641",  label: "Rémunération du personnel",                    kind: "charge" },
+  { code: "65",   label: "Autres charges de gestion courante",           kind: "charge" },
+  { code: "66",   label: "Charges financières",                          kind: "charge" },
+  { code: "68",   label: "Dotation aux amortissements et provisions",    kind: "charge" },
+];
+
+// Familles du plan comptable, identifiées par les deux premiers chiffres du
+// code (60x → 60, 6161 → 61, 75411 → 75…). L'ordre de cette liste fixe l'ordre
+// d'affichage des familles dans la vue regroupée du compte de résultat.
+export const ACCOUNT_FAMILIES = {
+  charge: [
+    { code: "60", label: "Achats" },
+    { code: "61", label: "Services extérieurs" },
+    { code: "62", label: "Autres services extérieurs" },
+    { code: "63", label: "Impôts et taxes" },
+    { code: "64", label: "Charges de personnel" },
+    { code: "65", label: "Autres charges de gestion courante" },
+    { code: "66", label: "Charges financières" },
+    { code: "67", label: "Charges exceptionnelles" },
+    { code: "68", label: "Dotation aux amortissements et provisions" },
+  ],
+  produit: [
+    { code: "70", label: "Ventes et prestations" },
+    { code: "74", label: "Subventions d'exploitation" },
+    { code: "75", label: "Autres produits de gestion courante" },
+    { code: "76", label: "Produits financiers" },
+    { code: "77", label: "Produits exceptionnels" },
+    { code: "78", label: "Reprises sur amortissements et provisions" },
+    { code: "79", label: "Transfert de charges" },
+  ],
+};
+
+// La famille se déduit des deux premiers chiffres du code, sauf pour de rares
+// postes dont le préfixe ne colle pas à la famille voulue (ex. 7135 —
+// variation des stocks — se range avec les ventes 70, pas 71).
+const FAMILY_OVERRIDES = { "7135": "70" };
+export const familyCode = (code) => FAMILY_OVERRIDES[code] || String(code || "").slice(0, 2);
+
+// Fusionne le plan stocké en base (source de vérité pour les libellés, l'ordre
+// et l'état masqué des postes existants) avec les postes-constantes : chaque
+// poste-constante absent de la base est ajouté en fin de sa classe et marqué
+// `extra: 1`, sans jamais écraser un poste homonyme déjà en base.
+export function mergeAccountRows(rows) {
+  const byCode = new Set(rows.map((r) => r.code));
+  const maxPos = { produit: -1, charge: -1 };
+  for (const r of rows) {
+    if (r.kind in maxPos) maxPos[r.kind] = Math.max(maxPos[r.kind], Number(r.position) || 0);
+  }
+  const merged = rows.map((r) => ({ ...r, extra: 0 }));
+  for (const x of EXTRA_ACCOUNTS) {
+    if (byCode.has(x.code)) continue;
+    maxPos[x.kind] += 1;
+    merged.push({
+      code: x.code, label: x.label, kind: x.kind,
+      auto_source: null, position: maxPos[x.kind], hidden: 0, extra: 1,
+    });
+  }
+  return merged;
+}
+
+// Regroupe des lignes de compte de résultat par famille (2 premiers chiffres),
+// dans l'ordre de ACCOUNT_FAMILIES, avec le sous-total de chaque famille. Une
+// famille sans aucun poste rattaché est omise ; un code hors nomenclature
+// tombe dans une famille « Divers » de secours, ordonnée après les familles
+// connues, pour ne jamais perdre une ligne.
+function buildGroups(lines, kind) {
+  const fams = ACCOUNT_FAMILIES[kind] || [];
+  const groups = fams.map((f) => ({ code: f.code, label: f.label, subtotal: 0, lines: [] }));
+  const byCode = new Map(groups.map((g) => [g.code, g]));
+  const fallback = [];
+  for (const l of lines) {
+    const fc = familyCode(l.code);
+    let g = byCode.get(fc);
+    if (!g) {
+      g = { code: fc, label: "Divers", subtotal: 0, lines: [] };
+      byCode.set(fc, g);
+      fallback.push(g);
+    }
+    g.lines.push(l);
+    g.subtotal += l.total;
+  }
+  fallback.sort((a, b) => a.code.localeCompare(b.code));
+  return groups.concat(fallback).filter((g) => g.lines.length > 0);
+}
+
 // Un exercice ("2025-2026") va de septembre de l'année de départ à août de
 // l'année suivante. Les month_key des événements sont au format "YYYY-MM",
 // qui trie lexicographiquement comme une date : on peut donc borner
@@ -187,9 +288,10 @@ export async function computeResult(env, exerciseKey) {
   for (const row of manualRes.results) totals[row.account_code] = (totals[row.account_code] || 0) + Number(row.total || 0);
   for (const e of eventEntries) totals[e.accountCode] = (totals[e.accountCode] || 0) + e.amount;
 
-  const toLine = (a) => ({ code: a.code, label: a.label, hidden: !!a.hidden, total: totals[a.code] || 0 });
-  const produits = accountsRes.results.filter((a) => a.kind === "produit").map(toLine);
-  const charges = accountsRes.results.filter((a) => a.kind === "charge").map(toLine);
+  const accounts = mergeAccountRows(accountsRes.results);
+  const toLine = (a) => ({ code: a.code, label: a.label, hidden: !!a.hidden, extra: !!a.extra, total: totals[a.code] || 0 });
+  const produits = accounts.filter((a) => a.kind === "produit").map(toLine);
+  const charges = accounts.filter((a) => a.kind === "charge").map(toLine);
   const totalProduits = produits.reduce((s, a) => s + a.total, 0);
   const totalCharges = charges.reduce((s, a) => s + a.total, 0);
 
@@ -200,5 +302,11 @@ export async function computeResult(env, exerciseKey) {
     totalProduits,
     totalCharges,
     net: totalProduits - totalCharges,
+    // Vue regroupée : mêmes lignes, organisées en familles avec sous-totaux.
+    // Les deux vues partagent donc rigoureusement les mêmes chiffres.
+    groups: {
+      produit: buildGroups(produits, "produit"),
+      charge: buildGroups(charges, "charge"),
+    },
   };
 }

@@ -1,15 +1,18 @@
 import { json } from "../../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../../_lib/auth.js";
 import { rowToAccount } from "../../../_lib/serialize.js";
+import { mergeAccountRows } from "../../../_lib/accounting.js";
 
 const KINDS = ["produit", "charge"];
 
-// GET /api/accounting/accounts — liste du plan de comptes (postes masqués inclus).
+// GET /api/accounting/accounts — liste du plan de comptes (postes masqués
+// inclus), complétée par les postes-constantes du plan standard (marqués
+// `extra`) pour qu'ils soient sélectionnables à la saisie et visibles au plan.
 export async function onRequestGet({ request, env }) {
   if (!isAuthorized(request, env)) return unauthorized();
 
   const rows = await env.DB.prepare("SELECT * FROM acct_accounts ORDER BY kind ASC, position ASC").all();
-  return json(rows.results.map(rowToAccount));
+  return json(mergeAccountRows(rows.results).map(rowToAccount));
 }
 
 // POST /api/accounting/accounts — ajoute un poste manuel au plan de comptes.

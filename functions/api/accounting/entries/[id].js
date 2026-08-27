@@ -1,7 +1,7 @@
 import { json } from "../../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../../_lib/auth.js";
 import { rowToEntry } from "../../../_lib/serialize.js";
-import { isValidExerciseKey } from "../../../_lib/accounting.js";
+import { isValidExerciseKey, resolveAccountByCode } from "../../../_lib/accounting.js";
 
 const KINDS = ["produit", "charge"];
 
@@ -42,7 +42,7 @@ export async function onRequestPut({ request, env, params }) {
   }
 
   if (body.accountCode !== undefined) {
-    const account = await env.DB.prepare("SELECT * FROM acct_accounts WHERE code = ?").bind(merged.accountCode).first();
+    const account = await resolveAccountByCode(env, merged.accountCode);
     if (!account) return json({ error: "Poste comptable introuvable." }, { status: 400 });
     if (account.auto_source) {
       return json({ error: "Ce poste est alimenté automatiquement par la Frise — modifiez l'événement plutôt qu'une écriture." }, { status: 400 });

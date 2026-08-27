@@ -55,6 +55,19 @@ export const ACCOUNT_FAMILIES = {
 const FAMILY_OVERRIDES = { "7135": "70" };
 export const familyCode = (code) => FAMILY_OVERRIDES[code] || String(code || "").slice(0, 2);
 
+// Résout un poste par code, qu'il soit stocké en base OU fourni en constante
+// (postes-constantes du plan standard). Renvoie un objet au même format qu'une
+// ligne de acct_accounts (code, label, kind, auto_source…) ou null si inconnu.
+// Indispensable à la saisie : sans lui, affecter une écriture à un poste-
+// constante (ex. 611) échouerait avec « Poste comptable introuvable ».
+export async function resolveAccountByCode(env, code) {
+  const row = await env.DB.prepare("SELECT * FROM acct_accounts WHERE code = ?").bind(code).first();
+  if (row) return row;
+  const extra = EXTRA_ACCOUNTS.find((a) => a.code === code);
+  if (extra) return { code: extra.code, label: extra.label, kind: extra.kind, auto_source: null, position: null, hidden: 0, extra: 1 };
+  return null;
+}
+
 // Fusionne le plan stocké en base (source de vérité pour les libellés, l'ordre
 // et l'état masqué des postes existants) avec les postes-constantes : chaque
 // poste-constante absent de la base est ajouté en fin de sa classe et marqué

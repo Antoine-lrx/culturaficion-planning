@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
   Users, Wallet, Scale, Lock, Unlock, Loader2, Home, Search, MapPin, List,
   Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
-  ReceiptText, Eye, EyeOff, BookOpen, Menu, Beef,
+  ReceiptText, Eye, EyeOff, BookOpen, Menu, Beef, Layers,
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 import Ganaderias from "./Ganaderias.jsx";
@@ -393,6 +393,28 @@ html, body{
 .cf-acct-amount.pos{color:#3F7A4E;font-weight:700}
 .cf-acct-amount.neg{color:#BB322C;font-weight:700}
 .cf-acct-row.total .cf-acct-amount.pos,.cf-acct-row.total .cf-acct-amount.neg{color:inherit}
+/* Vue regroupée : lignes de famille (60, 61…) distinctes des sous-postes. */
+.cf-acct-famrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;margin-top:8px;
+  background:var(--albero-2);border:1px solid rgba(26,20,19,.14);border-radius:9px;
+  font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.03em;color:var(--tinta)}
+.cf-acct-famrow:first-child{margin-top:0}
+.cf-acct-famrow .cf-acct-amount{font-family:'Bebas Neue',sans-serif;font-size:19px}
+.cf-acct-row.sub{margin-left:18px}
+.cf-acct-row.sub+.cf-acct-famrow{margin-top:8px}
+.cf-acct-noteref{font-size:9.5px;font-weight:700;color:var(--oro);margin-left:4px;vertical-align:super}
+.cf-acct-showzeros{appearance:none;background:none;border:none;cursor:pointer;font-family:inherit;
+  font-size:12px;color:#8a7550;font-weight:600;padding:6px 2px;margin:2px 0 2px auto;display:block;text-decoration:underline}
+.cf-acct-showzeros:hover{color:var(--sangre)}
+.cf-acct-notes{margin-top:18px;padding-top:12px;border-top:1px dashed rgba(26,20,19,.18)}
+.cf-acct-notes p{margin:0 0 3px;font-size:11.5px;font-style:italic;color:#8a7f72;line-height:1.45}
+.cf-acct-alert{display:flex;gap:10px;align-items:flex-start;margin:6px 0 2px;
+  background:rgba(184,134,46,.1);border:1px solid rgba(184,134,46,.4);border-left:3px solid var(--oro)}
+.cf-acct-alert>svg{flex:0 0 auto;margin-top:2px;color:var(--oro)}
+.cf-acct-alert p{margin:4px 0 8px;font-size:12.5px;color:#6b6258}
+.cf-acct-alert ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.cf-acct-alert li{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  background:var(--blanco);border:1px solid rgba(26,20,19,.12);border-radius:8px;padding:6px 10px;font-size:12.5px}
+.cf-btn-sm{padding:5px 10px;font-size:12px}
 
 .cf-bilan-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:6px}
 .cf-bilan-col{display:flex;flex-direction:column;gap:6px}
@@ -529,6 +551,10 @@ export default function App() {
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctError, setAcctError] = useState("");
   const [acctKindFilter, setAcctKindFilter] = useState("all");
+  // Compte de résultat : vue détaillée (défaut) / regroupée par familles, et
+  // affichage des postes à zéro par section — persistant en mémoire de session.
+  const [acctResultView, setAcctResultView] = useState("detail");
+  const [acctShowZeros, setAcctShowZeros] = useState({ produit: false, charge: false });
   const [entryModal, setEntryModal] = useState(null);
   const [acctAccountsModal, setAcctAccountsModal] = useState(false);
   const [newAcctAccount, setNewAcctAccount] = useState({ code: "", label: "", kind: "produit" });
@@ -863,7 +889,75 @@ export default function App() {
   };
 
   const acctVisibleLine = (l) => !l.hidden || l.total !== 0;
+  // Export (PDF/Excel) inchangé cette session : on garde le comportement
+  // historique pour les postes en base et on n'y injecte pas les postes-
+  // constantes tant qu'ils sont à zéro (sinon l'export gagnerait des lignes).
+  const acctExportLine = (l) => (l.extra ? l.total !== 0 : acctVisibleLine(l));
   const sumLines = (lines) => (lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+  // Compte de résultat — masquage des postes à zéro (Chantier 3) et rendu
+  // partagé entre vue détaillée et vue regroupée.
+  const AUTO_CODE = { produit: "7061", charge: "61" };
+  // Renvois de bas de page (Chantier 4) rattachés à leurs postes.
+  const ACCT_NOTE_REFS = { "611": "1", "75411": "2", "6238": "3" };
+  const acctAmtClass = (kind) => (kind === "produit" ? "pos" : "neg");
+  const acctZeroHidden = (l, kind) => !acctShowZeros[kind] && l.total === 0;
+  const acctHasZeroLines = (lines) => (lines || []).some((l) => l.total === 0);
+  const toggleAcctZeros = (kind) => setAcctShowZeros((s) => ({ ...s, [kind]: !s[kind] }));
+
+  const renderAcctLine = (l, kind, sub) => {
+    if (acctZeroHidden(l, kind)) return null;
+    const isAuto = l.code === AUTO_CODE[kind];
+    const noteRef = ACCT_NOTE_REFS[l.code];
+    return (
+      <div className={"cf-acct-row" + (sub ? " sub" : "") + (l.hidden ? " hidden-acct" : "") + (isAuto ? " auto" : "")} key={l.code}>
+        <span>
+          <span className="code">{l.code}</span>{l.label}
+          {noteRef && <sup className="cf-acct-noteref">({noteRef})</sup>}
+          {isAuto && <span className="cf-acct-eventbadge" style={{ marginLeft: 8 }}>Auto · Frise</span>}
+        </span>
+        <span className={"cf-acct-amount " + acctAmtClass(kind)}>{eur(l.total)}</span>
+      </div>
+    );
+  };
+
+  const renderAcctGroups = (kind) => {
+    const groups = acctResult?.groups?.[kind] || [];
+    return groups.map((g) => {
+      // Famille entièrement à zéro → masquée (sauf « afficher tous les postes »).
+      if (!acctShowZeros[kind] && g.subtotal === 0) return null;
+      // Famille réduite à son seul poste homonyme (code == code famille) :
+      // on n'affiche que la ligne de famille, sans doublon en retrait.
+      const collapse = g.lines.length === 1 && g.lines[0].code === g.code;
+      return (
+        <React.Fragment key={g.code}>
+          <div className="cf-acct-famrow">
+            <span>{g.code} · {g.label}</span>
+            <span className={"cf-acct-amount " + acctAmtClass(kind)}>{eur(g.subtotal)}</span>
+          </div>
+          {!collapse && g.lines.map((l) => renderAcctLine(l, kind, true))}
+        </React.Fragment>
+      );
+    });
+  };
+
+  const renderAcctZeroToggle = (kind) => {
+    const lines = kind === "produit" ? acctResult.produits : acctResult.charges;
+    if (!acctHasZeroLines(lines)) return null;
+    return (
+      <button className="cf-acct-showzeros" onClick={() => toggleAcctZeros(kind)}>
+        {acctShowZeros[kind] ? "Masquer les postes à zéro" : "Afficher tous les postes"}
+      </button>
+    );
+  };
+
+  // Chantier 1 — écritures manuelles saisies sur « 60 · Divers » qui relèvent
+  // en réalité de « 611 · Locations » (location du gymnase practico). On ne
+  // migre rien en silence : on alerte pour une réaffectation manuelle.
+  const acctMisclassified = useMemo(
+    () => acctEntries.filter((e) => e.source !== "event" && e.accountCode === "60" && /gymnase|location|practico/i.test(e.label || "")),
+    [acctEntries]
+  );
   // Aperçu en direct des totaux actif/passif pendant la saisie des lignes
   // manuelles, avant enregistrement (l'ouverture, la clôture et le résultat
   // viennent eux du bilan calculé côté serveur).
@@ -884,10 +978,10 @@ export default function App() {
     const rows = [
       ["Culturafición — Comptabilité"], [`Exercice ${globalSeasonKey}`], [],
       ["Compte de résultat"], ["Produits"],
-      ...acctResult.produits.filter(acctVisibleLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
+      ...acctResult.produits.filter(acctExportLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
       ["Total produits", acctResult.totalProduits.toFixed(2)], [],
       ["Charges"],
-      ...acctResult.charges.filter(acctVisibleLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
+      ...acctResult.charges.filter(acctExportLine).map((l) => [`${l.code} ${l.label}`, l.total.toFixed(2)]),
       ["Total charges", acctResult.totalCharges.toFixed(2)], [],
       ["Résultat net", acctResult.net.toFixed(2)], [],
       ["Bilan"], ["Actif", ""],
@@ -1680,6 +1774,29 @@ export default function App() {
 
           <span className="cf-workdoc"><AlertTriangle size={12} /> Document de travail — à valider par le trésorier</span>
 
+          {acctMisclassified.length > 0 && (
+            <div className="cf-note cf-acct-alert">
+              <AlertTriangle size={16} />
+              <div>
+                <b>{acctMisclassified.length} écriture{acctMisclassified.length > 1 ? "s" : ""} à reclasser ?</b>
+                <p>
+                  La location du gymnase practico relève désormais du poste <b>611 · Locations mobilières et immobilières</b> (famille
+                  61 – Services extérieurs), et non de <b>60 · Divers</b>. Vérifiez ces lignes et réaffectez-les au besoin — rien n'est déplacé automatiquement.
+                </p>
+                <ul>
+                  {acctMisclassified.map((e) => (
+                    <li key={e.id}>
+                      <span>{e.label} — {eur(e.amount)}</span>
+                      <button className="cf-btn cf-btn-ghost cf-btn-sm" onClick={() => openEditEntry(e)}>
+                        <Pencil size={12} /> Reclasser
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {acctError && <div className="cf-note error">{acctError}</div>}
 
           {acctLoading ? (
@@ -1757,32 +1874,48 @@ export default function App() {
               )}
 
               {acctTab === "resultat" && acctResult && (
-                <div className="cf-acct-table">
-                  <div className="cf-acct-section">Produits</div>
-                  {acctResult.produits.filter(acctVisibleLine).map((l) => (
-                    <div className={"cf-acct-row" + (l.hidden ? " hidden-acct" : "") + (l.code === "7061" ? " auto" : "")} key={l.code}>
-                      <span><span className="code">{l.code}</span>{l.label}{l.code === "7061" && <span className="cf-acct-eventbadge" style={{ marginLeft: 8 }}>Auto · Frise</span>}</span>
-                      <span className="cf-acct-amount pos">{eur(l.total)}</span>
+                <>
+                  <div className="cf-controls" style={{ margin: "0 0 2px" }}>
+                    <div className="cf-spacer" />
+                    <div className="cf-viewtoggle">
+                      <button className="cf-vt" aria-pressed={acctResultView === "detail"} onClick={() => setAcctResultView("detail")}>
+                        <List size={14} /> Vue détaillée
+                      </button>
+                      <button className="cf-vt" aria-pressed={acctResultView === "grouped"} onClick={() => setAcctResultView("grouped")}>
+                        <Layers size={14} /> Vue regroupée
+                      </button>
                     </div>
-                  ))}
-                  <div className="cf-acct-row total"><span>Total produits</span><span>{eur(acctResult.totalProduits)}</span></div>
-
-                  <div className="cf-acct-section">Charges</div>
-                  {acctResult.charges.filter(acctVisibleLine).map((l) => (
-                    <div className={"cf-acct-row" + (l.hidden ? " hidden-acct" : "") + (l.code === "61" ? " auto" : "")} key={l.code}>
-                      <span><span className="code">{l.code}</span>{l.label}{l.code === "61" && <span className="cf-acct-eventbadge" style={{ marginLeft: 8 }}>Auto · Frise</span>}</span>
-                      <span className="cf-acct-amount neg">{eur(l.total)}</span>
-                    </div>
-                  ))}
-                  <div className="cf-acct-row total"><span>Total charges</span><span>{eur(acctResult.totalCharges)}</span></div>
-
-                  <div className="cf-stat net" style={{ marginTop: 16 }}>
-                    <span><Scale size={13} /> Résultat de l'exercice {globalSeasonKey}</span>
-                    <span className="val" style={{ color: acctResult.net >= 0 ? "#7FB98A" : "#E98A84" }}>
-                      {acctResult.net > 0 ? "+" : ""}{eur(acctResult.net)}
-                    </span>
                   </div>
-                </div>
+
+                  <div className="cf-acct-table">
+                    <div className="cf-acct-section">Produits</div>
+                    {acctResultView === "grouped"
+                      ? renderAcctGroups("produit")
+                      : acctResult.produits.map((l) => renderAcctLine(l, "produit", false))}
+                    {renderAcctZeroToggle("produit")}
+                    <div className="cf-acct-row total"><span>Total produits</span><span>{eur(acctResult.totalProduits)}</span></div>
+
+                    <div className="cf-acct-section">Charges</div>
+                    {acctResultView === "grouped"
+                      ? renderAcctGroups("charge")
+                      : acctResult.charges.map((l) => renderAcctLine(l, "charge", false))}
+                    {renderAcctZeroToggle("charge")}
+                    <div className="cf-acct-row total"><span>Total charges</span><span>{eur(acctResult.totalCharges)}</span></div>
+
+                    <div className="cf-stat net" style={{ marginTop: 16 }}>
+                      <span><Scale size={13} /> Résultat de l'exercice {globalSeasonKey}</span>
+                      <span className="val" style={{ color: acctResult.net >= 0 ? "#7FB98A" : "#E98A84" }}>
+                        {acctResult.net > 0 ? "+" : ""}{eur(acctResult.net)}
+                      </span>
+                    </div>
+
+                    <div className="cf-acct-notes">
+                      <p>(1) Location gymnase pour entraînement practico</p>
+                      <p>(2) Dons collectés lors de campagnes en ligne ou lors des soirées via HelloAsso</p>
+                      <p>(3) En cas de dons pour soutenir d'autres associations ou organisateurs en difficulté</p>
+                    </div>
+                  </div>
+                </>
               )}
 
               {acctTab === "bilan" && acctBalance && balanceDraft && (
@@ -2355,7 +2488,8 @@ export default function App() {
             <div className="cf-modal-body">
               <p style={{ margin: 0, fontSize: 13, color: "#7a6f63" }}>
                 Renommez ou masquez un poste, ou ajoutez-en un nouveau. Les postes 7061 et 61 sont alimentés automatiquement
-                par la Frise et ne peuvent pas être modifiés ici. Masquer un poste ne supprime pas les écritures déjà saisies.
+                par la Frise ; les postes <em>standard</em> du plan comptable associatif sont fournis par l'outil. Ces deux
+                catégories ne se modifient pas ici. Masquer un poste ne supprime pas les écritures déjà saisies.
               </p>
               {["produit", "charge"].map((kind) => (
                 <div key={kind}>
@@ -2363,18 +2497,24 @@ export default function App() {
                     {kind === "produit" ? "Produits" : "Charges"}
                   </div>
                   <div className="cf-catlist">
-                    {acctAccounts.filter((a) => a.kind === kind).map((a) => (
+                    {acctAccounts.filter((a) => a.kind === kind).map((a) => {
+                      const locked = !!a.autoSource || !!a.extra;
+                      return (
                       <div className="cf-catrow" key={a.code}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: "#9a8d7c", minWidth: 44 }}>{a.code}</span>
-                        <input className="lab" value={a.label} disabled={!!a.autoSource}
+                        <input className="lab" value={a.label} disabled={locked}
                           onChange={(e) => renameAcctAccount(a.code, e.target.value)} aria-label="Nom du poste" />
                         {a.autoSource && <span className="used">auto</span>}
-                        <button className="cf-act" aria-label={a.hidden ? "Réafficher le poste" : "Masquer le poste"}
-                          title={a.hidden ? "Réafficher" : "Masquer"} onClick={() => toggleAcctAccountHidden(a.code, !a.hidden)}>
-                          {a.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
-                        </button>
+                        {a.extra && !a.autoSource && <span className="used">standard</span>}
+                        {!locked && (
+                          <button className="cf-act" aria-label={a.hidden ? "Réafficher le poste" : "Masquer le poste"}
+                            title={a.hidden ? "Réafficher" : "Masquer"} onClick={() => toggleAcctAccountHidden(a.code, !a.hidden)}>
+                            {a.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                          </button>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -2417,12 +2557,12 @@ export default function App() {
 
           <h2 style={{ marginTop: 20 }}>Compte de résultat</h2>
           <h3>Produits</h3>
-          {acctResult.produits.filter(acctVisibleLine).map((l) => (
+          {acctResult.produits.filter(acctExportLine).map((l) => (
             <div className="cf-print-row" key={l.code}><span>{l.code} · {l.label}</span><span>{eur(l.total)}</span></div>
           ))}
           <div className="cf-print-row total"><span>Total produits</span><span>{eur(acctResult.totalProduits)}</span></div>
           <h3>Charges</h3>
-          {acctResult.charges.filter(acctVisibleLine).map((l) => (
+          {acctResult.charges.filter(acctExportLine).map((l) => (
             <div className="cf-print-row" key={l.code}><span>{l.code} · {l.label}</span><span>{eur(l.total)}</span></div>
           ))}
           <div className="cf-print-row total"><span>Total charges</span><span>{eur(acctResult.totalCharges)}</span></div>

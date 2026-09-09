@@ -28,6 +28,10 @@ export function rowToMembership(row) {
     firstName: row.first_name,
     lastName: row.last_name,
     type: row.type,
+    tarif: row.tarif ?? null,          // 'plein' | 'jeune' | null
+    amount: row.amount ?? null,        // montant en euros, null si inconnu
+    source: row.source || "manuel",    // 'manuel' | 'helloasso'
+    tierName: row.tier_name ?? null,   // libellé brut du tarif HelloAsso
     seasonKey: row.season_key,
     joinedDate: row.joined_date,
     createdAt: row.created_at,

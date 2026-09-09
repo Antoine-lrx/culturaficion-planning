@@ -1,7 +1,7 @@
 import { json } from "../../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../../_lib/auth.js";
 import { rowToEntry } from "../../../_lib/serialize.js";
-import { isValidExerciseKey, getEventEntries, resolveAccountByCode } from "../../../_lib/accounting.js";
+import { isValidExerciseKey, getEventEntries, getMembershipEntries, resolveAccountByCode } from "../../../_lib/accounting.js";
 
 const KINDS = ["produit", "charge"];
 
@@ -17,13 +17,14 @@ export async function onRequestGet({ request, env }) {
     return json({ error: "Paramètre 'exercise' requis (ex. 2025-2026)." }, { status: 400 });
   }
 
-  const [manualRes, eventEntries] = await Promise.all([
+  const [manualRes, eventEntries, membershipEntries] = await Promise.all([
     env.DB.prepare("SELECT * FROM acct_entries WHERE exercise_key = ? ORDER BY op_date ASC, created_at ASC").bind(exercise).all(),
     getEventEntries(env, exercise),
+    getMembershipEntries(env, exercise),
   ]);
 
   const manual = manualRes.results.map(rowToEntry);
-  const all = [...manual, ...eventEntries].sort((a, b) => (a.opDate || "9999").localeCompare(b.opDate || "9999"));
+  const all = [...manual, ...eventEntries, ...membershipEntries].sort((a, b) => (a.opDate || "9999").localeCompare(b.opDate || "9999"));
 
   return json(all);
 }

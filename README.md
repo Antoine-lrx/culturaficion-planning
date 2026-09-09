@@ -229,10 +229,14 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   `registered`, `revenue`, `expenses`, `created_at`.
 - `categories` : `id`, `label`, `color`, `position`.
 - `meta` : `key` / `value` (utilisé pour `startYear` — seul réglage encore
-  modifiable — et `startMonth`, conservé pour compatibilité mais toujours
-  fixé à `8`/septembre par le code, plus réglable depuis l'interface).
+  modifiable —, `startMonth`, conservé pour compatibilité mais toujours fixé à
+  `8`/septembre par le code, et `helloasso_memberships_last_sync`, horodatage
+  de la dernière synchro des adhésions HelloAsso).
 - `memberships` : `id`, `first_name`, `last_name`, `type` (`tendido` ou
-  `practicos`), `season_key`, `joined_date`, `created_at` (voir section 7).
+  `practicos`), `season_key`, `joined_date`, `created_at`, plus (migration
+  `0009`) `tarif` (`plein`/`jeune`/NULL), `amount`, `source`
+  (`manuel`/`helloasso`), `helloasso_item_id`, `tier_name`, `is_deleted`
+  (pierre tombale RGPD) — voir section 7.
 - `acct_accounts`, `acct_entries`, `acct_balance` : plan de comptes, journal
   et éléments de bilan du module Comptabilité (voir section 8).
 - `ganaderias` : `id`, `name`, `country` (`france`/`espagne`), `address`,
@@ -328,12 +332,18 @@ npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0003
 
 ## 7. Page Adhésions (saisie manuelle)
 
-Le bureau gère les adhésions via Yapla, sans API disponible pour les
-récupérer automatiquement. Cette page permet donc de **saisir les
-adhésions à la main**, pour suivre leur évolution saison après saison.
+Depuis 2026, l'association gère ses adhésions via **HelloAsso** (comme la
+billetterie). Les adhésions de la saison en cours sont donc **récupérées
+automatiquement par l'API** ; les saisies manuelles des saisons passées
+(anciennement via Yapla) sont **intégralement conservées**. Le formulaire de
+saisie manuelle reste disponible pour la saisie rétroactive ou une adhésion
+hors HelloAsso.
 
 - Deux types d'adhésion : **tendido** et **prácticos**. Une personne prenant
   les deux apparaît comme deux adhérents distincts (une ligne par type).
+- Deux **tarifs** en plus du type : **plein** et **jeune** (-30 ans), ou
+  « non précisé » pour une saisie manuelle. Les quatre tarifs HelloAsso ne
+  sont donc que deux types × deux tarifs — la colonne `type` est inchangée.
 - Une **saison** va de septembre à août (ex. `2025-2026`) — **même sélecteur
   de saison que la Frise** (flèches précédent/suivant en haut de page) : il
   n'y a plus qu'un seul point de navigation entre saisons dans toute l'app.
@@ -373,14 +383,94 @@ npx wrangler d1 execute culturaficion_planning --remote --command="UPDATE meta S
 - `GET /api/memberships/non-renewed` — pour chaque type, les adhérents
   ayant eu ce type une saison passée mais aucune adhésion (tout type
   confondu) pour la saison en cours ; alimente la section « À relancer ».
+- `POST /api/memberships/sync` — récupère les adhésions HelloAsso et met la
+  base à jour (voir « Intégration HelloAsso » ci-dessous). Corps optionnel
+  `{ "force": true }`. Garde-fou : sans `force`, ignoré si la dernière synchro
+  date de moins de 60 minutes.
+- `GET /api/memberships/monthly` — données du graphique d'évolution mensuelle
+  (nouvelles adhésions par mois, par saison, + adhérents sans date).
 
 Protégés par le même code d'accès (`ACCESS_CODE`) que le reste de l'app.
 
-### Migration à appliquer
+### Migrations à appliquer
 
 ```
 npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0004_add_memberships.sql
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0009_add_membership_helloasso.sql
 ```
+
+La migration `0009` est **additive** : elle n'ajoute que des colonnes
+(`tarif`, `amount`, `source`, `helloasso_item_id`, `tier_name`, `is_deleted`)
+et des index, sans reconstruire la table ni toucher aux lignes existantes.
+Toutes les lignes déjà en base héritent de `source = 'manuel'`,
+`tarif = NULL`, `amount = NULL` : l'historique n'est pas réécrit.
+
+### Intégration HelloAsso (adhésions)
+
+Le principe est le même que pour la billetterie : appels **côté serveur**
+uniquement, identifiants jamais exposés au frontend. La fonction d'obtention
+du jeton OAuth2 (`functions/_lib/helloasso.js`) est **partagée** entre la
+billetterie et les adhésions.
+
+**Variables d'environnement Cloudflare** (Settings → Variables et secrets) :
+
+- `HELLOASSO_CLIENT_ID`, `HELLOASSO_CLIENT_SECRET`, `HELLOASSO_ORG_SLUG` :
+  déjà en place pour la billetterie, **réutilisées** telles quelles.
+- `HELLOASSO_MEMBERSHIP_FORM_SLUG` : **nouvelle variable**, valeur
+  `temporada-2026-2027`. C'est le `formSlug` du formulaire d'adhésion HelloAsso.
+
+> ⚠️ **Ce slug change à chaque saison** si un nouveau formulaire d'adhésion est
+> créé dans HelloAsso. Il est en variable d'environnement (et non en dur dans
+> le code) précisément pour pouvoir être mis à jour au moment de la campagne
+> suivante, **sans redéploiement** : il suffit de modifier la variable dans le
+> tableau de bord Cloudflare.
+
+**Fonctionnement** :
+
+- À l'ouverture de la page Adhésions, le frontend appelle `POST
+  /api/memberships/sync` (sans `force`) puis recharge la liste. Le garde-fou
+  d'une heure fait que, le plus souvent, l'appel revient instantanément.
+- Un bouton **« Synchroniser maintenant »** force la synchro (`force: true`).
+- La récupération lit les états `Processed` (paiement en ligne), `Registered`
+  (adhésions enregistrées à la main : chèque, espèces) et `Canceled`
+  (annulations, retirées de la base). Les montants HelloAsso sont en centimes
+  (divisés par 100).
+- **Correspondance des tarifs** : table `TIER_MAPPING` en haut de
+  `functions/api/memberships/sync.js`, par **égalité stricte** sur le libellé
+  normalisé (minuscules, sans accent, espaces réduits). Un libellé inconnu
+  n'est jamais deviné : il est remonté dans un avertissement visible
+  (« tarif non reconnu ») à ajouter manuellement au tableau.
+- **Écritures économes** : une ligne n'est écrite que si quelque chose a
+  réellement changé (quotas D1). L'horodatage de la dernière synchro est
+  stocké dans `meta.helloasso_memberships_last_sync`.
+- Si HelloAsso est injoignable, la page continue de fonctionner avec les
+  données déjà en base (message discret, non bloquant).
+
+**RGPD** — seules les données minimales sont stockées : prénom, nom, type,
+tarif, montant, date d'adhésion, saison, identifiant de l'article HelloAsso.
+Email, téléphone, adresse, ville, code postal, pays, société et champs
+personnalisés sont **écartés côté serveur avant toute écriture**. La
+suppression d'une ligne HelloAsso pose une **pierre tombale** : les données
+personnelles sont effacées, seul subsiste l'identifiant technique + le drapeau
+`is_deleted = 1`, pour que la synchro ne recrée jamais la ligne. Les lignes
+`is_deleted = 1` sont exclues de tous les affichages, totaux, graphiques et de
+la comptabilité.
+
+### Comptabilité — cotisations auto-sourcées (compte 7562)
+
+Comme les événements de la Frise alimentent les comptes 7061 et 61, les
+adhésions HelloAsso alimentent automatiquement le compte **7562**
+(cotisations) : **une ligne par mois** (libellé
+`Cotisations HelloAsso — octobre 2026 (7 adhésions)`, date au dernier jour du
+mois, montant = somme des adhésions du mois). Périmètre : `source='helloasso'`,
+montant non nul, `is_deleted=0`, sur l'exercice affiché. Les adhésions
+manuelles n'alimentent **pas** la comptabilité. Ces lignes portent un badge
+« auto — Adhésions », ne sont ni modifiables ni supprimables depuis la
+Comptabilité (on corrige à la source, dans la page Adhésions), et figurent dans
+les exports PDF/Excel. Si le compte 7562 contient à la fois des lignes
+manuelles et des lignes automatiques sur le même exercice, un avertissement de
+**double comptage** s'affiche en haut du journal des recettes (il informe, ne
+supprime ni ne fusionne rien).
 
 ### Section « À relancer » (adhérents non renouvelés)
 

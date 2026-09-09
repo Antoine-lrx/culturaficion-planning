@@ -11,6 +11,7 @@ export async function onRequestGet({ request, env }) {
             SUM(CASE WHEN type = 'tendido' THEN 1 ELSE 0 END) AS tendido,
             SUM(CASE WHEN type = 'practicos' THEN 1 ELSE 0 END) AS practicos
      FROM memberships
+     WHERE is_deleted = 0
      GROUP BY season_key
      ORDER BY season_key ASC`
   ).all();

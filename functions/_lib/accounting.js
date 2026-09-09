@@ -176,6 +176,64 @@ export async function getEventEntries(env, exerciseKey) {
   return entries;
 }
 
+// Compte des cotisations alimenté automatiquement par les adhésions HelloAsso.
+const MEMBERSHIP_ACCOUNT_CODE = "7562";
+const MONTHS_LONG_FR = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+];
+
+// Les adhésions HelloAsso alimentent automatiquement le compte 7562
+// (cotisations), sur le même principe que les événements de la Frise : source
+// unique, pas de ressaisie. On agrège UNE ligne par mois (pas une par
+// adhérent) — c'est la façon de tenir un journal et ça évite des dizaines de
+// lignes illisibles.
+//
+// Périmètre strict : source='helloasso', montant non nul, is_deleted=0, et la
+// saison = l'exercice affiché. Les adhésions manuelles n'alimentent JAMAIS la
+// comptabilité, même avec un montant saisi (chiffres d'origine incertaine).
+export async function getMembershipEntries(env, exerciseKey) {
+  const rows = await env.DB.prepare(
+    `SELECT joined_date, amount FROM memberships
+      WHERE source = 'helloasso' AND is_deleted = 0 AND amount IS NOT NULL
+        AND season_key = ? AND joined_date IS NOT NULL`
+  ).bind(exerciseKey).all();
+
+  // Regroupement par mois (AAAA-MM) : total encaissé + nombre d'adhésions.
+  const byMonth = new Map();
+  for (const r of rows.results) {
+    const monthKey = String(r.joined_date).slice(0, 7); // AAAA-MM
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) continue;
+    const acc = byMonth.get(monthKey) || { total: 0, count: 0 };
+    acc.total += Number(r.amount) || 0;
+    acc.count += 1;
+    byMonth.set(monthKey, acc);
+  }
+
+  const entries = [];
+  for (const [monthKey, acc] of [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const y = Number(monthKey.slice(0, 4));
+    const m = Number(monthKey.slice(5, 7)); // 1-based
+    // Date = dernier jour du mois concerné.
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const opDate = `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+    const label = `Cotisations HelloAsso — ${MONTHS_LONG_FR[m - 1]} ${y} (${acc.count} adhésion${acc.count > 1 ? "s" : ""})`;
+    entries.push({
+      id: `membership:${exerciseKey}:${monthKey}`,
+      exerciseKey,
+      opDate,
+      kind: "produit",
+      accountCode: MEMBERSHIP_ACCOUNT_CODE,
+      label,
+      amount: Math.round(acc.total * 100) / 100,
+      source: "membership",
+      monthKey,
+      count: acc.count,
+    });
+  }
+  return entries;
+}
+
 // Un exercice a-t-il la moindre trace en base (bilan, écritures ou
 // événements) ? Sert à distinguer le tout premier exercice suivi (aucune
 // donnée avant lui) d'un exercice simplement pas encore renseigné.
@@ -289,17 +347,19 @@ export async function computeBalance(env, exerciseKey) {
 // en agrégeant les écritures manuelles et les recettes/dépenses des
 // événements de la Frise, plus le résultat net.
 export async function computeResult(env, exerciseKey) {
-  const [accountsRes, manualRes, eventEntries] = await Promise.all([
+  const [accountsRes, manualRes, eventEntries, membershipEntries] = await Promise.all([
     env.DB.prepare("SELECT * FROM acct_accounts ORDER BY position ASC").all(),
     env.DB.prepare(
       "SELECT account_code, SUM(amount) AS total FROM acct_entries WHERE exercise_key = ? GROUP BY account_code"
     ).bind(exerciseKey).all(),
     getEventEntries(env, exerciseKey),
+    getMembershipEntries(env, exerciseKey),
   ]);
 
   const totals = {};
   for (const row of manualRes.results) totals[row.account_code] = (totals[row.account_code] || 0) + Number(row.total || 0);
   for (const e of eventEntries) totals[e.accountCode] = (totals[e.accountCode] || 0) + e.amount;
+  for (const e of membershipEntries) totals[e.accountCode] = (totals[e.accountCode] || 0) + e.amount;
 
   const accounts = mergeAccountRows(accountsRes.results);
   const toLine = (a) => ({ code: a.code, label: a.label, hidden: !!a.hidden, extra: !!a.extra, total: totals[a.code] || 0 });

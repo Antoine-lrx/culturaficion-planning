@@ -1,8 +1,6 @@
 import { json } from "../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../_lib/auth.js";
-
-const TOKEN_URL = "https://api.helloasso.com/oauth2/token";
-const API_BASE = "https://api.helloasso.com/v5";
+import { getAccessToken, HELLOASSO_API_BASE as API_BASE } from "../../_lib/helloasso.js";
 
 // Nom de l'état HelloAsso correspondant à un paiement validé. À confirmer
 // en sandbox (voir README) — les valeurs possibles observées sur l'API
@@ -32,25 +30,6 @@ export async function onRequestGet({ request, env, params }) {
     console.error("HelloAsso:", err && err.message);
     return json({ error: "Données HelloAsso indisponibles." }, { status: 502 });
   }
-}
-
-async function getAccessToken(env) {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: env.HELLOASSO_CLIENT_ID,
-      client_secret: env.HELLOASSO_CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Échec de l'authentification HelloAsso (statut ${res.status}) : ${body.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  if (!data.access_token) throw new Error("Jeton HelloAsso absent de la réponse.");
-  return data.access_token;
 }
 
 // Garde-fou : une invocation Cloudflare Pages Function ne peut faire qu'un

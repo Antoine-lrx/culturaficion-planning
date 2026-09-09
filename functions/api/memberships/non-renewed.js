@@ -4,10 +4,19 @@ import { currentSeasonKey } from "../../_lib/season.js";
 
 const TYPES = ["tendido", "practicos"];
 
-// Rapprochement par prénom + nom (insensible à la casse, espaces superflus
-// ignorés) : la table memberships n'a pas d'identifiant unique par personne.
+// Rapprochement par prénom + nom. Les noms venant de HelloAsso peuvent être
+// orthographiés différemment de ceux saisis à la main (casse, accents,
+// espaces) : on normalise donc UNIQUEMENT pour la comparaison — minuscules,
+// accents supprimés, espaces réduits, bords rognés. Les valeurs stockées et
+// affichées ne sont jamais altérées. Limite assumée : deux orthographes
+// réellement différentes (« Jean-Pierre » vs « JP ») ne sont pas rapprochées.
 function normalizeName(firstName, lastName) {
-  return `${firstName} ${lastName}`.trim().toLowerCase().replace(/\s+/g, " ");
+  return `${firstName || ""} ${lastName || ""}`
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 // GET /api/memberships/non-renewed — pour chaque type, les adhérents ayant eu
@@ -18,7 +27,7 @@ export async function onRequestGet({ request, env }) {
 
   const currentSeason = currentSeasonKey();
 
-  const rows = await env.DB.prepare("SELECT first_name, last_name, type, season_key FROM memberships").all();
+  const rows = await env.DB.prepare("SELECT first_name, last_name, type, season_key FROM memberships WHERE is_deleted = 0").all();
 
   const renewedThisSeason = new Set();
   for (const r of rows.results) {

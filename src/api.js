@@ -90,6 +90,8 @@ export const api = {
   deleteMembership: (id) => request(`/api/memberships/${id}`, { method: "DELETE" }),
   getMembershipsSummary: () => request("/api/memberships/summary"),
   getNonRenewed: () => request("/api/memberships/non-renewed"),
+  syncMemberships: (force = false) => request("/api/memberships/sync", { method: "POST", body: { force } }),
+  getMembershipsMonthly: () => request("/api/memberships/monthly"),
 
   listAccounts: () => request("/api/accounting/accounts"),
   createAccount: (a) => request("/api/accounting/accounts", { method: "POST", body: a }),

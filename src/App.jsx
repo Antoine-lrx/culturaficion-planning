@@ -42,6 +42,11 @@ const MEMBERSHIP_TYPES = {
   tendido:   { label: "Tendido",   color: "#BB322C" },
   practicos: { label: "Prácticos", color: "#B8862E" },
 };
+// Deux tarifs, en plus des deux types. « Non précisé » = null (défaut).
+const TARIF_LABELS = { plein: "Plein", jeune: "Jeune" };
+// Mois d'une saison, de septembre (index 0) à août (index 11), pour le graphe.
+const SEASON_MONTHS_SHORT = ["S", "O", "N", "D", "J", "F", "M", "A", "M", "J", "J", "A"];
+const SEASON_MONTHS_LABEL = ["sept.", "oct.", "nov.", "déc.", "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août"];
 
 const STATUSES = {
   idee:        { label: "Idée",        op: 0.38 },
@@ -82,6 +87,14 @@ function fmtDate(iso) {
   try {
     const d = new Date(iso + "T00:00:00");
     return new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short" }).format(d);
+  } catch { return null; }
+}
+function fmtSyncDate(iso) {
+  if (!iso) return null;
+  try {
+    return new Intl.DateTimeFormat("fr-FR", {
+      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    }).format(new Date(iso));
   } catch { return null; }
 }
 function stripDiacritics(str) {
@@ -315,6 +328,8 @@ html, body{
 .cf-note{font-size:12.5px;color:#7a6f63;background:rgba(184,134,46,.12);border:1px solid rgba(184,134,46,.35);
   border-radius:10px;padding:9px 12px;margin:6px 0 2px}
 .cf-note.error{color:var(--sangre-deep);background:rgba(187,50,44,.1);border-color:rgba(187,50,44,.4)}
+.cf-note.warn{display:flex;align-items:flex-start;gap:8px;color:#8a5a2e;font-weight:500}
+.cf-note.warn svg{flex:none;margin-top:1px}
 
 .cf-card{cursor:pointer}
 .cf-card-stats{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11.5px;font-weight:600;color:#7a6f63;margin-bottom:8px;
@@ -354,7 +369,44 @@ html, body{
 .cf-memb-name{font-size:14px;font-weight:600;flex:1 1 auto;min-width:0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cf-memb-date{font-size:12px;color:#7a6f63;white-space:nowrap}
+.cf-memb-amount{font-size:12.5px;font-weight:700;color:var(--tinta);white-space:nowrap;flex:none}
 .cf-memb-actions{display:flex;gap:3px;flex:none}
+.cf-memb-hasrc{display:inline-block;margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:#355E8A;background:rgba(53,94,138,.12);border:1px solid rgba(53,94,138,.3);
+  border-radius:999px;padding:1px 7px;vertical-align:middle}
+
+/* Ligne d'état de la synchro HelloAsso (adhésions) — discrète, non bloquante. */
+.cf-sync-line{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;min-height:18px;margin:-2px 0 2px}
+.cf-sync-msg{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
+.cf-sync-msg.ok{color:#3F7A4E}
+.cf-sync-msg.warn{color:#8a5a2e}
+.cf-sync-date{font-size:11.5px;color:#8a7f73;margin-left:auto}
+
+/* Grille de totaux détaillée (2 types × 2 tarifs). */
+.cf-memb-totals{margin:2px 0 4px}
+.cf-memb-grid{width:100%;border-collapse:collapse;background:var(--blanco);border:1px solid rgba(26,20,19,.14);
+  border-radius:11px;overflow:hidden}
+.cf-memb-grid th,.cf-memb-grid td{padding:9px 12px;text-align:right;font-size:14px}
+.cf-memb-grid thead th{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#7a6f63;font-weight:700;
+  background:rgba(26,20,19,.03)}
+.cf-memb-grid tbody th{text-align:left;font-weight:600;font-size:13px;color:var(--tinta)}
+.cf-memb-grid tbody th .dot{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:7px}
+.cf-memb-grid td{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.02em;color:var(--tinta)}
+.cf-memb-grid td.tot{font-weight:700;color:var(--sangre)}
+.cf-memb-grid tbody tr+tr td,.cf-memb-grid tbody tr+tr th{border-top:1px solid rgba(26,20,19,.08)}
+.cf-memb-grid tr.grand th,.cf-memb-grid tr.grand td{background:rgba(184,134,46,.08);border-top:1.5px solid rgba(26,20,19,.16)}
+.cf-memb-grid-unit{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;color:#7a6f63;letter-spacing:0}
+
+/* Graphique d'évolution mensuelle (SVG fait main). */
+.cf-memb-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:600;color:#6b6258;margin:2px 0 6px}
+.cf-memb-legend>span{display:inline-flex;align-items:center;gap:6px}
+.cf-memb-legend-line{width:20px;border-radius:2px}
+.cf-memb-chart{width:100%;overflow-x:auto}
+.cf-memb-svg{width:100%;max-width:560px;height:auto;display:block}
+.cf-chart-line{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.cf-chart-axis{stroke:rgba(26,20,19,.35);stroke-width:1}
+.cf-chart-grid{stroke:rgba(26,20,19,.12);stroke-width:1;stroke-dasharray:3 3}
+.cf-chart-xlab,.cf-chart-ylab{font-family:'Inter',sans-serif;font-size:9px;fill:#8a7f73;font-weight:600}
 
 .cf-hist-legend{display:flex;gap:16px;align-items:center;font-size:12px;font-weight:600;color:#6b6258;margin:2px 0 6px}
 .cf-hist-legend .dot{width:9px;height:9px;border-radius:3px;margin-right:6px}
@@ -532,6 +584,11 @@ export default function App() {
   const [membSummary, setMembSummary] = useState([]);
   const [membModal, setMembModal] = useState(null);
   const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", tendido: [], practicos: [] });
+  // Synchronisation HelloAsso des adhésions (non bloquante).
+  const [membSync, setMembSync] = useState({ status: "idle", lastSync: null, message: "", error: "" });
+  // Données du graphique d'évolution mensuelle (par saison) + filtre de type.
+  const [membMonthly, setMembMonthly] = useState([]);
+  const [chartTypeFilter, setChartTypeFilter] = useState("all");
 
   // Comptabilité : plan de comptes, journal (manuel + événements de la
   // Frise), compte de résultat calculé et bilan assisté, sur la même
@@ -647,6 +704,53 @@ export default function App() {
     }
   }, []);
 
+  const loadMonthly = useCallback(async () => {
+    try {
+      const data = await api.getMembershipsMonthly();
+      setMembMonthly(data?.seasons || []);
+    } catch {
+      /* le graphique reste tel quel si la requête échoue */
+    }
+  }, []);
+
+  // Synchronisation HelloAsso. Non bloquante : en cas d'échec, la page reste
+  // pleinement utilisable avec les données déjà en base. Recharge la liste,
+  // les totaux, les non-renouvelés et le graphique après une synchro utile.
+  const syncMembers = useCallback(async (force, season) => {
+    setMembSync((s) => ({ ...s, status: "loading", message: "", error: "" }));
+    try {
+      const res = await api.syncMemberships(force);
+      if (res?.error) {
+        setMembSync({ status: "error", lastSync: res.lastSync || null, message: "", error: res.error });
+        return;
+      }
+      if (res?.skipped) {
+        setMembSync({ status: "ok", lastSync: res.lastSync || null, message: "", error: "" });
+        return;
+      }
+      const parts = [];
+      if (res.created) parts.push(`${res.created} nouvelle${res.created > 1 ? "s" : ""} adhésion${res.created > 1 ? "s" : ""}`);
+      if (res.updated) parts.push(`${res.updated} mise${res.updated > 1 ? "s" : ""} à jour`);
+      if (res.removed) parts.push(`${res.removed} retirée${res.removed > 1 ? "s" : ""}`);
+      const message = parts.length ? parts.join(", ") : "Aucun changement";
+      setMembSync({
+        status: "ok",
+        lastSync: res.lastSync || null,
+        message,
+        error: "",
+        unknownTiers: res.unknownTiers || [],
+      });
+      // Recharge tout ce qui dépend des adhésions.
+      loadMembers(season || globalSeasonKey);
+      loadMembSummary();
+      loadNonRenewed();
+      loadMonthly();
+    } catch (e) {
+      if (e.unauthorized) { clearCode(); setAuthState("needed"); return; }
+      setMembSync((s) => ({ ...s, status: "error", error: "Synchronisation HelloAsso indisponible pour le moment." }));
+    }
+  }, [globalSeasonKey, loadMembers, loadMembSummary, loadNonRenewed, loadMonthly]);
+
   useEffect(() => {
     if (authState === "ok" && view === "adhesions") loadMembers(globalSeasonKey);
   }, [authState, view, globalSeasonKey, loadMembers]);
@@ -655,8 +759,21 @@ export default function App() {
     if (authState === "ok" && view === "adhesions") {
       loadMembSummary();
       loadNonRenewed();
+      loadMonthly();
     }
-  }, [authState, view, loadMembSummary, loadNonRenewed]);
+  }, [authState, view, loadMembSummary, loadNonRenewed, loadMonthly]);
+
+  // À l'ouverture de la page Adhésions : synchro automatique sans force (le
+  // garde-fou d'une heure fait que, le plus souvent, l'appel revient
+  // instantanément sans rappeler HelloAsso).
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (authState === "ok" && view === "adhesions" && !autoSyncedRef.current) {
+      autoSyncedRef.current = true;
+      syncMembers(false, globalSeasonKey);
+    }
+    if (view !== "adhesions") autoSyncedRef.current = false;
+  }, [authState, view, globalSeasonKey, syncMembers]);
 
   const loadAcctAll = useCallback(async (exercise) => {
     setAcctError("");
@@ -723,7 +840,7 @@ export default function App() {
     });
   };
   const openEditEntry = (entry) => {
-    if (entry.source === "event") return;
+    if (entry.source === "event" || entry.source === "membership") return;
     setEntryModal({ mode: "edit", draft: { ...entry, amount: String(entry.amount) } });
   };
   const openEventFromEntry = (entry) => {
@@ -958,6 +1075,19 @@ export default function App() {
     () => acctEntries.filter((e) => e.source !== "event" && e.accountCode === "60" && /gymnase|location|practico/i.test(e.label || "")),
     [acctEntries]
   );
+  // Alerte doublon : sur le même exercice, lignes manuelles ET lignes
+  // automatiques (adhésions HelloAsso) sur le compte 7562. On informe, on ne
+  // décide pas : le trésorier garde la main sur chaque ligne (Chemin B).
+  const membDupAlert = useMemo(() => {
+    let manual = 0;
+    let auto = 0;
+    for (const e of acctEntries) {
+      if (e.accountCode !== "7562") continue;
+      if (e.source === "membership") auto += 1;
+      else if (e.source !== "event") manual += 1;
+    }
+    return { manual, auto, show: manual > 0 && auto > 0 };
+  }, [acctEntries]);
   // Aperçu en direct des totaux actif/passif pendant la saisie des lignes
   // manuelles, avant enregistrement (l'ouverture, la clôture et le résultat
   // viennent eux du bilan calculé côté serveur).
@@ -1165,10 +1295,13 @@ export default function App() {
   const openAddMember = () => {
     setMembModal({
       mode: "add",
-      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", seasonKey: globalSeasonKey, joinedDate: "" },
+      draft: { id: uid(), firstName: "", lastName: "", type: "tendido", tarif: null, amount: "", seasonKey: globalSeasonKey, joinedDate: "" },
     });
   };
-  const openEditMember = (m) => setMembModal({ mode: "edit", draft: { ...m } });
+  const openEditMember = (m) => setMembModal({
+    mode: "edit",
+    draft: { ...m, tarif: m.tarif ?? null, amount: m.amount == null ? "" : String(m.amount) },
+  });
 
   const submitMembModal = async () => {
     const d = membModal.draft;
@@ -1177,13 +1310,15 @@ export default function App() {
       if (membModal.mode === "add") {
         const created = await api.createMembership({
           id: d.id, firstName: d.firstName.trim(), lastName: d.lastName.trim(),
-          type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
+          type: d.type, tarif: d.tarif ?? null, amount: d.amount === "" ? null : d.amount,
+          seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
         if (created.seasonKey === globalSeasonKey) setMembers((list) => [...list, created]);
       } else {
         const updated = await api.updateMembership(d.id, {
           firstName: d.firstName.trim(), lastName: d.lastName.trim(),
-          type: d.type, seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
+          type: d.type, tarif: d.tarif ?? null, amount: d.amount === "" ? null : d.amount,
+          seasonKey: d.seasonKey, joinedDate: d.joinedDate || null,
         });
         setMembers((list) => {
           if (updated.seasonKey !== globalSeasonKey) return list.filter((m) => m.id !== updated.id);
@@ -1209,13 +1344,63 @@ export default function App() {
     }
   };
 
+  // Totaux détaillés de la saison affichée : 2 types × 2 tarifs. Un adhérent
+  // au tarif « Non précisé » (null) compte dans le total du type mais dans
+  // aucune colonne tarif — Plein + Jeune peut donc être < Total (honnête).
   const membTotals = useMemo(() => {
-    const tendido = members.filter((m) => m.type === "tendido").length;
-    const practicos = members.filter((m) => m.type === "practicos").length;
-    return { tendido, practicos, total: tendido + practicos };
+    const g = {
+      tendido:   { plein: 0, jeune: 0, total: 0 },
+      practicos: { plein: 0, jeune: 0, total: 0 },
+    };
+    let encaisse = 0;
+    let sansMontant = 0;
+    for (const m of members) {
+      if (!g[m.type]) continue;
+      g[m.type].total += 1;
+      if (m.tarif === "plein") g[m.type].plein += 1;
+      else if (m.tarif === "jeune") g[m.type].jeune += 1;
+      if (m.amount != null) encaisse += Number(m.amount) || 0;
+      else sansMontant += 1;
+    }
+    const colPlein = g.tendido.plein + g.practicos.plein;
+    const colJeune = g.tendido.jeune + g.practicos.jeune;
+    const total = g.tendido.total + g.practicos.total;
+    return { g, colPlein, colJeune, total, encaisse, sansMontant };
   }, [members]);
 
   const membHistMax = Math.max(1, ...membSummary.flatMap((s) => [s.tendido, s.practicos]));
+
+  // Données du graphique d'évolution mensuelle : la saison en cours + les deux
+  // précédentes, superposées. Courbes cumulées (sept → août) construites à
+  // partir de joined_date. Les adhérents sans date ne sont pas représentés.
+  const membChart = useMemo(() => {
+    const cur = seasonStartYear(globalSeasonKey);
+    const keys = [seasonKeyFromStart(cur - 2), seasonKeyFromStart(cur - 1), seasonKeyFromStart(cur)];
+    const byKey = {};
+    for (const s of membMonthly) byKey[s.season] = s;
+    let noDate = 0;
+    const series = keys.map((key) => {
+      const s = byKey[key];
+      const monthly = Array(12).fill(0);
+      if (s) {
+        for (let i = 0; i < 12; i++) {
+          if (chartTypeFilter === "all" || chartTypeFilter === "tendido") monthly[i] += s.monthly.tendido[i] || 0;
+          if (chartTypeFilter === "all" || chartTypeFilter === "practicos") monthly[i] += s.monthly.practicos[i] || 0;
+        }
+        const nd = s.noDate || { tendido: 0, practicos: 0 };
+        if (chartTypeFilter === "all" || chartTypeFilter === "tendido") noDate += nd.tendido || 0;
+        if (chartTypeFilter === "all" || chartTypeFilter === "practicos") noDate += nd.practicos || 0;
+      }
+      // Cumul mois par mois.
+      const cumulative = [];
+      let run = 0;
+      for (let i = 0; i < 12; i++) { run += monthly[i]; cumulative.push(run); }
+      return { season: key, cumulative, isCurrent: key === globalSeasonKey, total: run };
+    });
+    const max = Math.max(1, ...series.flatMap((s) => s.cumulative));
+    const hasData = series.some((s) => s.total > 0);
+    return { series, max, noDate, hasData };
+  }, [membMonthly, globalSeasonKey, chartTypeFilter]);
 
   const persistMeta = async (next) => {
     setMeta(next);
@@ -1345,7 +1530,7 @@ export default function App() {
         <button className="cf-btn cf-btn-ghost"
           onClick={() => {
             loadState();
-            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); }
+            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); loadMonthly(); }
             if (view === "compta") loadAcctAll(globalSeasonKey);
             if (view === "ganaderias") setGanadRefresh((n) => n + 1);
           }}
@@ -1633,26 +1818,75 @@ export default function App() {
           <div className="cf-controls">
             <span className="cf-season-lab">Saison {globalSeasonKey}</span>
             <div className="cf-spacer" />
+            <button className="cf-btn cf-btn-ghost" onClick={() => syncMembers(true, globalSeasonKey)} disabled={membSync.status === "loading"}>
+              {membSync.status === "loading"
+                ? <><Loader2 size={15} className="spin" /> Synchronisation…</>
+                : <><RefreshCw size={15} /> Synchroniser maintenant</>}
+            </button>
             <button className="cf-btn cf-btn-primary" onClick={openAddMember}>
               <Plus size={17} /> Ajouter un adhérent
             </button>
           </div>
 
+          {/* État de la synchronisation HelloAsso — discret et non bloquant. */}
+          <div className="cf-sync-line">
+            {membSync.status === "error" ? (
+              <span className="cf-sync-msg warn"><AlertTriangle size={13} /> {membSync.error}</span>
+            ) : membSync.status === "ok" && membSync.message ? (
+              <span className="cf-sync-msg ok"><Check size={13} /> {membSync.message}</span>
+            ) : <span />}
+            {membSync.lastSync && (
+              <span className="cf-sync-date">Dernière synchro : {fmtSyncDate(membSync.lastSync)}</span>
+            )}
+          </div>
+
+          {/* Tarifs non reconnus remontés par la dernière synchro : à signaler
+              pour que la correspondance soit ajoutée au code (jamais deviné). */}
+          {Array.isArray(membSync.unknownTiers) && membSync.unknownTiers.length > 0 && (
+            <div className="cf-note warn">
+              <AlertTriangle size={14} />
+              <span>
+                {membSync.unknownTiers.reduce((n, u) => n + u.count, 0)} adhésion(s) avec un tarif non reconnu :{" "}
+                {membSync.unknownTiers.map((u) => `« ${u.tierName} » (${u.count})`).join(", ")}.
+                Signale-le pour que la correspondance soit ajoutée.
+              </span>
+            </div>
+          )}
+
           {membersError && <div className="cf-note error">{membersError}</div>}
 
-          <div className="cf-stats" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <div className="cf-stat">
-              <span><Users size={13} /> Tendidos</span>
-              <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: ".02em" }}>{membTotals.tendido}</span>
+          {/* Totaux détaillés : 2 types × 2 tarifs. Plein + Jeune peut être
+              inférieur au total (adhérents au tarif « Non précisé »). */}
+          <div className="cf-memb-totals">
+            <table className="cf-memb-grid">
+              <thead>
+                <tr><th></th><th>Plein</th><th>Jeune</th><th>Total</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th><span className="dot" style={{ background: MEMBERSHIP_TYPES.tendido.color }} />Tendido</th>
+                  <td>{membTotals.g.tendido.plein}</td><td>{membTotals.g.tendido.jeune}</td><td className="tot">{membTotals.g.tendido.total}</td>
+                </tr>
+                <tr>
+                  <th><span className="dot" style={{ background: MEMBERSHIP_TYPES.practicos.color }} />Prácticos</th>
+                  <td>{membTotals.g.practicos.plein}</td><td>{membTotals.g.practicos.jeune}</td><td className="tot">{membTotals.g.practicos.total}</td>
+                </tr>
+                <tr className="grand">
+                  <th>Total</th>
+                  <td>{membTotals.colPlein}</td><td>{membTotals.colJeune}</td>
+                  <td className="tot">{membTotals.total} <span className="cf-memb-grid-unit">adhérent{membTotals.total > 1 ? "s" : ""}</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="cf-stat net" style={{ marginTop: 10 }}>
+              <span><Wallet size={13} /> Montant encaissé sur la saison</span>
+              <span className="val">{eur(membTotals.encaisse)}</span>
             </div>
-            <div className="cf-stat">
-              <span><Users size={13} /> Prácticos</span>
-              <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: ".02em" }}>{membTotals.practicos}</span>
-            </div>
-            <div className="cf-stat net">
-              <span><Users size={13} /> Total de la saison</span>
-              <span className="val">{membTotals.total}</span>
-            </div>
+            {membTotals.sansMontant > 0 && (
+              <span className="cf-hint" style={{ marginTop: 6 }}>
+                {membTotals.sansMontant} adhésion{membTotals.sansMontant > 1 ? "s" : ""} sans montant connu : ce total n'est pas exhaustif.
+              </span>
+            )}
           </div>
 
           {membersLoading ? (
@@ -1676,19 +1910,97 @@ export default function App() {
                 {members.map((m) => {
                   const t = MEMBERSHIP_TYPES[m.type] || NEUTRAL;
                   const when = fmtDate(m.joinedDate);
+                  const isHA = m.source === "helloasso";
+                  const tarifLabel = m.tarif ? TARIF_LABELS[m.tarif] : null;
                   return (
                     <div className="cf-memb-row" key={m.id}>
-                      <span className="cf-memb-type" style={{ background: t.color }}>{t.label}</span>
-                      <span className="cf-memb-name" title={`${m.firstName} ${m.lastName}`}>{m.firstName} {m.lastName}</span>
+                      <span className="cf-memb-type" style={{ background: t.color }}>
+                        {t.label}{tarifLabel ? ` · ${tarifLabel.toLowerCase()}` : ""}
+                      </span>
+                      <span className="cf-memb-name" title={`${m.firstName} ${m.lastName}`}>
+                        {m.firstName} {m.lastName}
+                        {isHA && <span className="cf-memb-hasrc" title="Importé depuis HelloAsso">HelloAsso</span>}
+                      </span>
+                      {m.amount != null && <span className="cf-memb-amount">{eur(m.amount)}</span>}
                       <span className="cf-memb-date">{when || (m.joinedDate ? m.joinedDate : "—")}</span>
                       <div className="cf-memb-actions">
-                        <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
+                        {isHA ? (
+                          <button className="cf-act" aria-label="Modifier" title="Adhésion HelloAsso : non modifiable ici" disabled style={{ opacity: 0.35, cursor: "not-allowed" }}><Pencil size={13} /></button>
+                        ) : (
+                          <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
+                        )}
                         <button className="cf-act" aria-label="Supprimer" onClick={() => removeMember(m.id)}><Trash2 size={13} /></button>
                       </div>
                     </div>
                   );
                 })}
               </div>
+            </>
+          )}
+
+          <div className="cf-rule" />
+          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Évolution</span>
+          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Rythme des adhésions, mois par mois</h3>
+          <div className="cf-controls" style={{ margin: "0 0 6px" }}>
+            <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+              <button className="cf-sf" aria-pressed={chartTypeFilter === "all"} onClick={() => setChartTypeFilter("all")}>Tous</button>
+              <button className="cf-sf" aria-pressed={chartTypeFilter === "tendido"} onClick={() => setChartTypeFilter("tendido")}>Tendido</button>
+              <button className="cf-sf" aria-pressed={chartTypeFilter === "practicos"} onClick={() => setChartTypeFilter("practicos")}>Prácticos</button>
+            </div>
+          </div>
+          {!membChart.hasData ? (
+            <div className="cf-empty" style={{ flex: "none" }}>
+              <span>Le graphique apparaîtra dès qu'une adhésion datée sera enregistrée sur l'une des saisons affichées.</span>
+            </div>
+          ) : (
+            <>
+              <div className="cf-memb-legend">
+                {membChart.series.map((s, idx) => (
+                  <span key={s.season}>
+                    <span className="cf-memb-legend-line" style={{
+                      background: s.isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c",
+                      height: s.isCurrent ? 4 : 2,
+                    }} />
+                    {s.season}
+                  </span>
+                ))}
+              </div>
+              <div className="cf-memb-chart">
+                {(() => {
+                  const W = 340, H = 190, padL = 28, padR = 10, padT = 12, padB = 24;
+                  const plotW = W - padL - padR, plotH = H - padT - padB;
+                  const xAt = (i) => padL + (i * plotW) / 11;
+                  const yAt = (v) => padT + plotH * (1 - v / membChart.max);
+                  const colorFor = (idx, isCurrent) => (isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c");
+                  return (
+                    <svg viewBox={`0 0 ${W} ${H}`} className="cf-memb-svg" role="img" aria-label="Évolution mensuelle des adhésions">
+                      {/* Repères horizontaux + valeurs 0 et max. */}
+                      <line x1={padL} y1={yAt(0)} x2={W - padR} y2={yAt(0)} className="cf-chart-axis" />
+                      <line x1={padL} y1={yAt(membChart.max)} x2={W - padR} y2={yAt(membChart.max)} className="cf-chart-grid" />
+                      <text x={padL - 5} y={yAt(0) + 3} className="cf-chart-ylab" textAnchor="end">0</text>
+                      <text x={padL - 5} y={yAt(membChart.max) + 3} className="cf-chart-ylab" textAnchor="end">{membChart.max}</text>
+                      {/* Étiquettes des mois (sept → août). */}
+                      {SEASON_MONTHS_SHORT.map((lab, i) => (
+                        <text key={i} x={xAt(i)} y={H - 8} className="cf-chart-xlab" textAnchor="middle">{lab}</text>
+                      ))}
+                      {/* Une courbe cumulée par saison ; la saison en cours passe en dernier (au-dessus). */}
+                      {membChart.series.map((s, idx) => (
+                        <polyline
+                          key={s.season}
+                          className="cf-chart-line"
+                          points={s.cumulative.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ")}
+                          style={{ stroke: colorFor(idx, s.isCurrent), strokeWidth: s.isCurrent ? 2.6 : 1.5, opacity: s.isCurrent ? 1 : 0.85 }}
+                        />
+                      ))}
+                    </svg>
+                  );
+                })()}
+              </div>
+              {membChart.noDate > 0 && (
+                <span className="cf-hint">
+                  {membChart.noDate} adhérent{membChart.noDate > 1 ? "s" : ""} sans date d'adhésion {membChart.noDate > 1 ? "ne sont pas représentés" : "n'est pas représenté"} sur ce graphique.
+                </span>
+              )}
             </>
           )}
 
@@ -1822,6 +2134,18 @@ export default function App() {
                     </button>
                   </div>
 
+                  {/* Alerte doublon : lignes manuelles + lignes automatiques
+                      (adhésions HelloAsso) sur le compte 7562. On informe, on
+                      ne fusionne ni ne supprime rien (Chemin B). */}
+                  {membDupAlert.show && (acctKindFilter === "all" || acctKindFilter === "produit") && (
+                    <div className="cf-note warn">
+                      <AlertTriangle size={14} />
+                      <span>
+                        Le compte 7562 contient {membDupAlert.manual} ligne{membDupAlert.manual > 1 ? "s" : ""} manuelle{membDupAlert.manual > 1 ? "s" : ""} et {membDupAlert.auto} ligne{membDupAlert.auto > 1 ? "s" : ""} automatique{membDupAlert.auto > 1 ? "s" : ""} issue{membDupAlert.auto > 1 ? "s" : ""} des adhésions HelloAsso sur cet exercice. Vérifie qu'il n'y a pas de double comptage.
+                      </span>
+                    </div>
+                  )}
+
                   {acctEntries.filter((e) => acctKindFilter === "all" || e.kind === acctKindFilter).length === 0 ? (
                     <div className="cf-empty" style={{ flex: "none" }}>
                       <b>Aucune opération pour {globalSeasonKey}</b>
@@ -1837,9 +2161,11 @@ export default function App() {
                         .map((e) => {
                           const acc = acctAccountById[e.accountCode];
                           const isEvent = e.source === "event";
+                          const isMembership = e.source === "membership";
+                          const isAuto = isEvent || isMembership;
                           const when = fmtDate(e.opDate);
                           return (
-                            <div className="cf-search-card" key={e.id} style={isEvent ? { cursor: "default" } : undefined}>
+                            <div className="cf-search-card" key={e.id} style={isAuto ? { cursor: "default" } : undefined}>
                               <span className="stripe" style={{ background: e.kind === "produit" ? "#3F7A4E" : "#BB322C" }} />
                               <div className="cf-search-card-main">
                                 <div className="cf-card-title">{e.label}</div>
@@ -1847,6 +2173,7 @@ export default function App() {
                                   {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
                                   <span>{acc ? `${acc.code} · ${acc.label}` : e.accountCode}</span>
                                   {isEvent && <span className="cf-acct-eventbadge">Depuis la Frise</span>}
+                                  {isMembership && <span className="cf-acct-eventbadge">auto — Adhésions</span>}
                                 </div>
                               </div>
                               <div className="cf-search-card-stats">
@@ -1856,6 +2183,11 @@ export default function App() {
                                 {isEvent ? (
                                   <button className="cf-act" aria-label="Voir l'événement" title="Voir l'événement dans la Frise"
                                     onClick={() => openEventFromEntry(e)}>
+                                    <ExternalLink size={13} />
+                                  </button>
+                                ) : isMembership ? (
+                                  <button className="cf-act" aria-label="Ouvrir les adhésions" title="Se corrige dans la page Adhésions"
+                                    onClick={() => setView("adhesions")}>
                                     <ExternalLink size={13} />
                                   </button>
                                 ) : (
@@ -2126,6 +2458,26 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div className="cf-field" style={{ flex: "1 1 200px" }}>
+                  <span>Tarif</span>
+                  <div className="cf-pickrow">
+                    <button className="cf-pick" aria-pressed={membModal.draft.tarif === "plein"}
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, tarif: "plein" } }))}>Plein</button>
+                    <button className="cf-pick" aria-pressed={membModal.draft.tarif === "jeune"}
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, tarif: "jeune" } }))}>Jeune</button>
+                    <button className="cf-pick" aria-pressed={membModal.draft.tarif == null}
+                      onClick={() => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, tarif: null } }))}>Non précisé</button>
+                  </div>
+                </div>
+                <label className="cf-field" style={{ flex: "1 1 120px" }}>
+                  <span>Montant (€, facultatif)</span>
+                  <input type="number" inputMode="decimal" min="0" step="0.01" className="cf-input"
+                    value={membModal.draft.amount ?? ""}
+                    onChange={(e) => setMembModal((mm) => ({ ...mm, draft: { ...mm.draft, amount: e.target.value } }))}
+                    onKeyDown={(e) => e.key === "Enter" && submitMembModal()} />
+                </label>
               </div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 <label className="cf-field" style={{ flex: "1 1 150px" }}>

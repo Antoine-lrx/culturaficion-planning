@@ -590,6 +590,8 @@ export default function App() {
   const [membRevenue, setMembRevenue] = useState(null);
   // Synchronisation HelloAsso des adhésions (non bloquante).
   const [membSync, setMembSync] = useState({ status: "idle", lastSync: null, message: "", error: "" });
+  // Diagnostic HelloAsso temporaire (lecture seule, sans donnée personnelle).
+  const [membDiag, setMembDiag] = useState({ status: "idle", data: null, error: "" });
   // Données du graphique d'évolution hebdomadaire (par saison) + filtre de type.
   const [membWeekly, setMembWeekly] = useState([]);
   const [chartTypeFilter, setChartTypeFilter] = useState("all");
@@ -727,6 +729,18 @@ export default function App() {
       setMembRevenue(data || null);
     } catch {
       /* les montants restent tels quels si la requête échoue */
+    }
+  }, []);
+
+  // Diagnostic HelloAsso temporaire (lecture seule, aucune donnée personnelle).
+  const runDiag = useCallback(async () => {
+    setMembDiag({ status: "loading", data: null, error: "" });
+    try {
+      const data = await api.getMembershipsDiagnostics();
+      setMembDiag({ status: "ok", data, error: "" });
+    } catch (e) {
+      if (e.unauthorized) { clearCode(); setAuthState("needed"); return; }
+      setMembDiag({ status: "error", data: null, error: e.message || "Diagnostic indisponible." });
     }
   }, []);
 
@@ -1876,6 +1890,10 @@ export default function App() {
                 ? <><Loader2 size={15} className="spin" /> Synchronisation…</>
                 : <><RefreshCw size={15} /> Synchroniser maintenant</>}
             </button>
+            {/* Bouton de diagnostic TEMPORAIRE (à retirer après). */}
+            <button className="cf-btn cf-btn-ghost" onClick={runDiag} disabled={membDiag.status === "loading"} title="Diagnostic HelloAsso (temporaire, sans donnée personnelle)">
+              {membDiag.status === "loading" ? <><Loader2 size={15} className="spin" /> Diagnostic…</> : <>🔎 Diagnostic</>}
+            </button>
             <button className="cf-btn cf-btn-primary" onClick={openAddMember}>
               <Plus size={17} /> Ajouter un adhérent
             </button>
@@ -1892,6 +1910,26 @@ export default function App() {
               <span className="cf-sync-date">Dernière synchro : {fmtSyncDate(membSync.lastSync)}</span>
             )}
           </div>
+
+          {/* Panneau de DIAGNOSTIC TEMPORAIRE (à retirer après). Aucune donnée
+              personnelle : uniquement identifiants, types, états, dates, montants. */}
+          {membDiag.status === "error" && (
+            <div className="cf-note warn"><AlertTriangle size={14} /> <span>{membDiag.error}</span></div>
+          )}
+          {membDiag.status === "ok" && membDiag.data && (
+            <div className="cf-note" style={{ display: "block" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Diagnostic HelloAsso — saison du formulaire : {membDiag.data.formSeason || "INDÉTERMINÉE"} · {membDiag.data.dbRowCount} ligne(s) en base ({membDiag.data.tombstoneCount} en pierre tombale) · {membDiag.data.itemCount ?? "—"} article(s) HelloAsso
+                {membDiag.data.apiError ? ` · erreur API : ${membDiag.data.apiError}` : ""}
+              </div>
+              <div style={{ fontSize: 12, color: "#7a6f63", marginBottom: 6 }}>
+                Copie-colle le bloc ci-dessous à Claude (il ne contient aucun nom).
+              </div>
+              <pre style={{ maxHeight: 320, overflow: "auto", background: "rgba(28,22,18,0.06)", padding: 10, borderRadius: 8, fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {JSON.stringify(membDiag.data, null, 2)}
+              </pre>
+            </div>
+          )}
 
           {/* Tarifs non reconnus remontés par la dernière synchro : à signaler
               pour que la correspondance soit ajoutée au code (jamais deviné). */}

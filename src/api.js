@@ -93,6 +93,7 @@ export const api = {
   syncMemberships: (force = false) => request("/api/memberships/sync", { method: "POST", body: { force } }),
   getMembershipsWeekly: () => request("/api/memberships/weekly"),
   getMembershipRevenue: (season) => request(`/api/memberships/revenue?season=${encodeURIComponent(season)}`),
+  getMembershipsDiagnostics: () => request("/api/memberships/diagnostics"),
 
   listAccounts: () => request("/api/accounting/accounts"),
   createAccount: (a) => request("/api/accounting/accounts", { method: "POST", body: a }),

@@ -27,3 +27,10 @@ export async function getAccessToken(env) {
   if (!data.access_token) throw new Error("Jeton HelloAsso absent de la réponse.");
   return data.access_token;
 }
+
+// Les montants renvoyés par l'API HelloAsso sont exprimés en CENTIMES. Cette
+// conversion en euros est faite à UN SEUL endroit et réutilisée partout où on
+// lit un montant HelloAsso (adhésions, dons), pour éviter tout écart d'échelle.
+export function centsToEuros(cents) {
+  return (Number(cents) || 0) / 100;
+}

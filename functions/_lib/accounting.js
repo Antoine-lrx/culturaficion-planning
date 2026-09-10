@@ -183,55 +183,163 @@ const MONTHS_LONG_FR = [
   "juillet", "août", "septembre", "octobre", "novembre", "décembre",
 ];
 
-// Les adhésions HelloAsso alimentent automatiquement le compte 7562
-// (cotisations), sur le même principe que les événements de la Frise : source
-// unique, pas de ressaisie. On agrège UNE ligne par mois (pas une par
-// adhérent) — c'est la façon de tenir un journal et ça évite des dizaines de
-// lignes illisibles.
-//
-// Périmètre strict : source='helloasso', montant non nul, is_deleted=0, et la
-// saison = l'exercice affiché. Les adhésions manuelles n'alimentent JAMAIS la
-// comptabilité, même avec un montant saisi (chiffres d'origine incertaine).
-export async function getMembershipEntries(env, exerciseKey) {
-  const rows = await env.DB.prepare(
-    `SELECT joined_date, amount FROM memberships
-      WHERE source = 'helloasso' AND is_deleted = 0 AND amount IS NOT NULL
-        AND season_key = ? AND joined_date IS NOT NULL`
-  ).bind(exerciseKey).all();
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-  // Regroupement par mois (AAAA-MM) : total encaissé + nombre d'adhésions.
+// Bornes JOUR d'un exercice ("2026-2027" → 2026-09-01 … 2027-08-31), au format
+// AAAA-MM-JJ qui se compare lexicographiquement comme une date.
+function exerciseDayBounds(exerciseKey) {
+  const y1 = Number(String(exerciseKey).split("-")[0]);
+  return { exStart: `${y1}-09-01`, exEnd: `${y1 + 1}-08-31` };
+}
+
+// SOURCE UNIQUE des montants de cotisations d'une saison (point 3). Utilisée à
+// la fois par l'endpoint de la page Adhésions et par la génération des lignes
+// automatiques du compte 7562 : les deux partagent donc exactement les mêmes
+// chiffres, au centime près, par construction.
+//
+// Périmètre comptable HelloAsso : source='helloasso', is_deleted=0, montant non
+// nul, season_key = exercice (tous les articles helloasso stockés sont des
+// Membership reconnus — dons et libellés inconnus ne sont jamais écrits en base).
+// Les adhésions manuelles restent HORS comptabilité (décision du bureau).
+export async function getMembershipRevenue(env, seasonKey) {
+  const { exStart, exEnd } = exerciseDayBounds(seasonKey);
+
+  const [haRes, manRow, noAmtRow, donRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT amount, joined_date FROM memberships
+        WHERE source = 'helloasso' AND is_deleted = 0 AND amount IS NOT NULL AND season_key = ?`
+    ).bind(seasonKey).all(),
+    env.DB.prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM memberships
+        WHERE source = 'manuel' AND is_deleted = 0 AND amount IS NOT NULL AND season_key = ?`
+    ).bind(seasonKey).first(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM memberships
+        WHERE is_deleted = 0 AND amount IS NULL AND season_key = ?`
+    ).bind(seasonKey).first(),
+    env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(`helloasso_membership_donations:${seasonKey}`).first(),
+  ]);
+
+  // Répartition des lignes HelloAsso : par mois (dans l'exercice), avant
+  // l'ouverture (réglées avant le 1er sept), après la clôture (cas rare).
   const byMonth = new Map();
-  for (const r of rows.results) {
-    const monthKey = String(r.joined_date).slice(0, 7); // AAAA-MM
-    if (!/^\d{4}-\d{2}$/.test(monthKey)) continue;
-    const acc = byMonth.get(monthKey) || { total: 0, count: 0 };
-    acc.total += Number(r.amount) || 0;
-    acc.count += 1;
-    byMonth.set(monthKey, acc);
+  let before = { total: 0, count: 0 };
+  let after = { total: 0, count: 0 };
+  for (const r of haRes.results) {
+    const amt = Number(r.amount) || 0;
+    const jd = r.joined_date ? String(r.joined_date) : null;
+    if (!jd || jd < exStart) {
+      before.total += amt;
+      before.count += 1;
+    } else if (jd > exEnd) {
+      after.total += amt;
+      after.count += 1;
+    } else {
+      const mk = jd.slice(0, 7); // AAAA-MM
+      const acc = byMonth.get(mk) || { total: 0, count: 0 };
+      acc.total += amt;
+      acc.count += 1;
+      byMonth.set(mk, acc);
+    }
   }
 
+  const byMonthArr = [...byMonth.entries()]
+    .map(([monthKey, v]) => ({ monthKey, total: round2(v.total), count: v.count }))
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+
+  // Les lignes 7562 sont construites ICI pour que X (page Adhésions) = somme
+  // des lignes automatiques 7562, par construction.
+  const entries = buildMembershipEntries(seasonKey, byMonthArr, before, after);
+  const helloassoTotal = round2(entries.reduce((s, e) => s + e.amount, 0));
+  const helloassoCount = entries.reduce((s, e) => s + e.count, 0);
+
+  let donations = { count: 0, total: 0 };
+  if (donRow?.value) {
+    try {
+      const p = JSON.parse(donRow.value);
+      donations = { count: Number(p.count) || 0, total: round2(p.total) };
+    } catch {
+      /* valeur illisible : on affiche zéro don plutôt que de planter */
+    }
+  }
+
+  return {
+    season: seasonKey,
+    entries,
+    helloasso: { total: helloassoTotal, count: helloassoCount },
+    manual: { total: round2(manRow?.total), count: Number(manRow?.count) || 0 },
+    noAmountCount: Number(noAmtRow?.count) || 0,
+    before: { total: round2(before.total), count: before.count },
+    after: { total: round2(after.total), count: after.count },
+    byMonth: byMonthArr,
+    donations,
+  };
+}
+
+// Construit les lignes automatiques du compte 7562 à partir de la répartition
+// calculée par getMembershipRevenue. UNE ligne par mois (datée du dernier jour
+// du mois), plus au besoin une ligne « avant l'ouverture » (datée du 1er sept)
+// et une ligne « après la clôture » (datée du 31 août). Agréger par mois évite
+// des dizaines de lignes illisibles.
+function buildMembershipEntries(exerciseKey, byMonthArr, before, after) {
+  const y1 = Number(String(exerciseKey).split("-")[0]);
+  const plural = (n) => (n > 1 ? "s" : "");
   const entries = [];
-  for (const [monthKey, acc] of [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+
+  for (const { monthKey, total, count } of byMonthArr) {
     const y = Number(monthKey.slice(0, 4));
     const m = Number(monthKey.slice(5, 7)); // 1-based
-    // Date = dernier jour du mois concerné.
     const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    const opDate = `${monthKey}-${String(lastDay).padStart(2, "0")}`;
-    const label = `Cotisations HelloAsso — ${MONTHS_LONG_FR[m - 1]} ${y} (${acc.count} adhésion${acc.count > 1 ? "s" : ""})`;
     entries.push({
       id: `membership:${exerciseKey}:${monthKey}`,
       exerciseKey,
-      opDate,
+      opDate: `${monthKey}-${String(lastDay).padStart(2, "0")}`,
       kind: "produit",
       accountCode: MEMBERSHIP_ACCOUNT_CODE,
-      label,
-      amount: Math.round(acc.total * 100) / 100,
+      label: `Cotisations HelloAsso — ${MONTHS_LONG_FR[m - 1]} ${y} (${count} adhésion${plural(count)})`,
+      amount: total,
       source: "membership",
       monthKey,
-      count: acc.count,
+      count,
     });
   }
-  return entries;
+
+  if (before.count > 0) {
+    entries.push({
+      id: `membership:${exerciseKey}:before`,
+      exerciseKey,
+      opDate: `${y1}-09-01`,
+      kind: "produit",
+      accountCode: MEMBERSHIP_ACCOUNT_CODE,
+      label: `Cotisations HelloAsso — réglées avant l'ouverture de l'exercice (${before.count} adhésion${plural(before.count)})`,
+      amount: round2(before.total),
+      source: "membership",
+      count: before.count,
+    });
+  }
+
+  if (after.count > 0) {
+    entries.push({
+      id: `membership:${exerciseKey}:after`,
+      exerciseKey,
+      opDate: `${y1 + 1}-08-31`,
+      kind: "produit",
+      accountCode: MEMBERSHIP_ACCOUNT_CODE,
+      label: `Cotisations HelloAsso — réglées après la clôture de l'exercice (${after.count} adhésion${plural(after.count)})`,
+      amount: round2(after.total),
+      source: "membership",
+      count: after.count,
+    });
+  }
+
+  return entries.sort((a, b) => a.opDate.localeCompare(b.opDate));
+}
+
+// Lignes automatiques du compte 7562 pour le journal et le compte de résultat.
+// Simple façade sur getMembershipRevenue : la source de vérité est unique.
+export async function getMembershipEntries(env, exerciseKey) {
+  const revenue = await getMembershipRevenue(env, exerciseKey);
+  return revenue.entries;
 }
 
 // Un exercice a-t-il la moindre trace en base (bilan, écritures ou
@@ -302,10 +410,17 @@ export async function resolveOpening(env, exerciseKey, depth = 0) {
 // ou saisie/ajustée à la main), trésorerie et fonds propres de clôture,
 // compléments manuels d'actif/passif et contrôle d'équilibre actif = passif.
 export async function computeBalance(env, exerciseKey) {
-  const [row, opening, result] = await Promise.all([
+  const y1 = Number(String(exerciseKey).split("-")[0]);
+  const nextSeasonKey = `${y1 + 1}-${y1 + 2}`;
+  const [row, opening, result, nextRevenue] = await Promise.all([
     env.DB.prepare("SELECT * FROM acct_balance WHERE exercise_key = ?").bind(exerciseKey).first(),
     resolveOpening(env, exerciseKey),
     computeResult(env, exerciseKey),
+    // Transparence (point 1) : cotisations de la saison SUIVANTE encaissées
+    // avant le 1er sept — présentes en banque à la clôture de cet exercice,
+    // mais rattachées à l'exercice suivant. Simple affichage : aucun chiffre
+    // du bilan n'est modifié, et cela fonctionne même si l'exercice est clôturé.
+    getMembershipRevenue(env, nextSeasonKey),
   ]);
 
   const manualAssets = safeParseArray(row?.manual_assets);
@@ -340,6 +455,11 @@ export async function computeBalance(env, exerciseKey) {
     balanced: Math.abs(totalActif - totalPassif) < 0.01,
     closed,
     closedAt: row?.closed_at || null,
+    // Mention informative (point 1) : { total, count } des cotisations de la
+    // saison suivante encaissées avant le 1er septembre. À n'afficher que si
+    // total > 0.
+    nextSeasonEarly: { total: nextRevenue.before.total, count: nextRevenue.before.count },
+    nextSeasonKey,
   };
 }
 

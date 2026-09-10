@@ -1,6 +1,7 @@
 import { json } from "../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../_lib/auth.js";
-import { getAccessToken, HELLOASSO_API_BASE as API_BASE } from "../../_lib/helloasso.js";
+import { getAccessToken, centsToEuros, HELLOASSO_API_BASE as API_BASE } from "../../_lib/helloasso.js";
+import { seasonFromSlug, isValidSeasonKey } from "../../_lib/season.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Correspondance entre les libellés de tarifs HelloAsso et les types/tarifs
@@ -23,12 +24,16 @@ const TIER_MAPPING = {
 };
 
 const META_KEY = "helloasso_memberships_last_sync";
+// Préfixe de la clé meta stockant l'agrégat des dons par saison (aucune donnée
+// personnelle) : « helloasso_membership_donations:2026-2027 » -> {count,total}.
+const DONATIONS_META_PREFIX = "helloasso_membership_donations:";
+// Message unique quand la saison du formulaire ne peut pas être déterminée.
+const SEASON_ERROR =
+  "Impossible de déterminer la saison du formulaire HelloAsso. Vérifie le nom du formulaire dans les réglages Cloudflare.";
 const PAGE_SIZE = 100;
 // Garde-fou : une invocation Pages Function ne peut faire qu'un nombre limité
 // de sous-requêtes réseau. On plafonne le nombre de pages par précaution.
 const MAX_PAGES = 50;
-// Marge de rattrapage des changements d'état tardifs (voir §2).
-const SYNC_OVERLAP_DAYS = 7;
 // Garde-fou anti-gaspillage (quotas D1) : deux synchros rapprochées sans
 // `force` ne rappellent pas HelloAsso.
 const MIN_INTERVAL_MS = 60 * 60 * 1000;
@@ -44,13 +49,21 @@ function normalizeTier(name) {
     .trim();
 }
 
-// Saison septembre → août déduite de la date d'adhésion (même convention que
-// toute l'application).
-function seasonFromJoinedDate(joinedDate) {
-  const y = Number(joinedDate.slice(0, 4));
-  const m = Number(joinedDate.slice(5, 7));
-  if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
-  return m >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+// Saison du FORMULAIRE HelloAsso (jamais la date de paiement). Une adhésion
+// issue de « temporada-2026-2027 » appartient à la saison 2026-2027, qu'elle
+// ait été réglée le 31 août ou le 15 octobre. Ordre de détermination :
+//   1. la saison lue dans le slug du formulaire (un seul motif AAAA-AAAA) ;
+//   2. sinon la variable d'environnement HELLOASSO_MEMBERSHIP_SEASON ;
+//   3. si les deux se contredisent, ou si aucune n'est valide → erreur (la
+//      synchronisation n'écrit alors rien).
+function resolveFormSeason(env) {
+  const fromSlug = seasonFromSlug(env.HELLOASSO_MEMBERSHIP_FORM_SLUG);
+  const rawEnv = env.HELLOASSO_MEMBERSHIP_SEASON;
+  const fromEnv = isValidSeasonKey(rawEnv) ? String(rawEnv).trim() : null;
+  if (fromSlug && fromEnv && fromSlug !== fromEnv) return { error: SEASON_ERROR };
+  const season = fromSlug || fromEnv;
+  if (!season) return { error: SEASON_ERROR };
+  return { season };
 }
 
 async function readLastSync(env) {
@@ -90,16 +103,24 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "Intégration HelloAsso (adhésions) non configurée.", lastSync }, { status: 200 });
   }
 
+  // Saison du formulaire (point 1). Résolue AVANT tout appel réseau : si elle
+  // est indéterminée, on n'écrit rien et on renvoie un message clair.
+  const seasonResolution = resolveFormSeason(env);
+  if (seasonResolution.error) {
+    return json({ error: seasonResolution.error, lastSync }, { status: 200 });
+  }
+  const formSeason = seasonResolution.season;
+
   try {
     const token = await getAccessToken(env);
 
-    // Première synchro (aucun lastSync) : on récupère tout l'historique du
-    // formulaire. Sinon on repart de la dernière synchro moins 7 jours.
-    let fromISO = null;
-    if (lastSync) {
-      const from = new Date(Date.parse(lastSync) - SYNC_OVERLAP_DAYS * 24 * 60 * 60 * 1000);
-      fromISO = from.toISOString();
-    }
+    // Synchro complète du formulaire à chaque fois (pas de fenêtre
+    // incrémentale). Deux raisons : (1) l'agrégat des dons de la saison ne se
+    // stockant que globalement, il doit être RECOMPTÉ intégralement à chaque
+    // synchro ; (2) un formulaire de saison (« temporada-2026-2027 ») ne
+    // contient qu'une saison, l'ensemble est donc borné. Le garde-fou de 60
+    // minutes et l'écriture uniquement-si-changement protègent les quotas D1.
+    const fromISO = null;
 
     // itemStates=Registered est indispensable : adhésions enregistrées à la
     // main par l'association (chèque, espèces). Processed = paiement en ligne.
@@ -116,24 +137,49 @@ export async function onRequestPost({ request, env }) {
     for (const r of existingRows.results) existingMap.set(String(r.helloasso_item_id), r);
 
     const writes = [];
+    // Clé = `${type}|${libellé}` pour distinguer, à l'affichage, un libellé
+    // vide selon le type d'article. Valeur = { tierName, type, count }.
     const unknownTiers = new Map();
     const seen = new Set();
     let created = 0;
     let updated = 0;
     let removed = 0;
     let newIdSeq = 0;
+    // Agrégat des dons de la saison (point 2) — aucune donnée personnelle.
+    let donationCount = 0;
+    let donationTotal = 0;
 
     for (const item of activeItems) {
       const haId = String(item.id);
       if (!haId || seen.has(haId)) continue;
       seen.add(haId);
 
-      // Correspondance stricte du tarif.
+      const itemType = item.type != null ? String(item.type) : "";
+      // Montant : conversion centimes → euros à un seul endroit (util partagé).
+      const amount = centsToEuros(item.amount);
+
+      // Dons (type Donation) : jamais des adhésions. Ils ne sont ni écrits dans
+      // `memberships`, ni comptés dans les totaux/graphique/relances/7562. On
+      // n'en garde qu'un agrégat par saison (voir plus bas).
+      if (itemType === "Donation") {
+        donationCount += 1;
+        donationTotal += amount;
+        continue;
+      }
+
+      // Correspondance stricte du tarif. On tente la table de correspondance
+      // pour les articles de type Membership (ou de type absent : le formulaire
+      // est un formulaire d'adhésion — repli défensif rétrocompatible).
       const tierName = item.name != null ? String(item.name) : "";
-      const mapped = TIER_MAPPING[normalizeTier(tierName)];
+      const isMembershipType = itemType === "" || itemType === "Membership";
+      const mapped = isMembershipType ? TIER_MAPPING[normalizeTier(tierName)] : undefined;
       if (!mapped) {
-        // Tarif non reconnu : jamais importé en silence, jamais deviné.
-        unknownTiers.set(tierName, (unknownTiers.get(tierName) || 0) + 1);
+        // Type inconnu, ou Membership au libellé non reconnu : jamais importé
+        // en silence, jamais deviné. On conserve le type pour l'affichage.
+        const key = `${itemType}|${tierName}`;
+        const cur = unknownTiers.get(key) || { tierName, type: itemType, count: 0 };
+        cur.count += 1;
+        unknownTiers.set(key, cur);
         continue;
       }
 
@@ -144,9 +190,6 @@ export async function onRequestPost({ request, env }) {
       const firstName = String(u.firstName || p.firstName || "").trim();
       const lastName = String(u.lastName || p.lastName || "").trim();
 
-      // Montant : les montants HelloAsso sont en CENTIMES → division par 100.
-      const amount = (Number(item.amount) || 0) / 100;
-
       // Date de la commande, tronquée à la date seule (AAAA-MM-JJ ISO).
       // Primaire : order.date ; replis défensifs selon la forme exacte de la
       // réponse HelloAsso, pour ne jamais perdre la date d'adhésion.
@@ -156,7 +199,9 @@ export async function onRequestPost({ request, env }) {
         const d = new Date(rawDate);
         if (!Number.isNaN(d.getTime())) joinedDate = d.toISOString().slice(0, 10);
       }
-      const seasonKey = joinedDate ? seasonFromJoinedDate(joinedDate) : null;
+      // Point 1 : la saison est celle du formulaire, jamais la date de paiement.
+      // La joined_date reste la vraie date de paiement (on ne la modifie pas).
+      const seasonKey = formSeason;
 
       const ex = existingMap.get(haId);
 
@@ -196,6 +241,41 @@ export async function onRequestPost({ request, env }) {
       }
     }
 
+    // Reprise des données existantes (point 1) : la synchro étant complète, TOUTE
+    // ligne du formulaire courant est re-parcourue ci-dessus et sa season_key
+    // recalée sur formSeason par le chemin ligne-par-ligne dès qu'elle diffère
+    // (via membershipChanged), et uniquement si elle change (quotas D1). On
+    // évite volontairement un UPDATE global `WHERE source='helloasso'` : le jour
+    // où le slug du formulaire changera de saison, il réaffecterait à tort les
+    // adhésions HelloAsso des saisons passées. Les pierres tombales (is_deleted
+    // = 1) ne sont jamais touchées : elles restent en pierre tombale.
+
+    // Agrégat des dons de la saison (point 2). Écriture uniquement si la valeur
+    // change. Aucune donnée personnelle : uniquement un nombre et un total.
+    const donationsKey = `${DONATIONS_META_PREFIX}${formSeason}`;
+    const donationsValue = JSON.stringify({
+      count: donationCount,
+      total: Math.round(donationTotal * 100) / 100,
+    });
+    const prevDonations = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(donationsKey).first();
+    let prevDonationsValue = null;
+    if (prevDonations?.value) {
+      try {
+        const p = JSON.parse(prevDonations.value);
+        prevDonationsValue = JSON.stringify({ count: Number(p.count) || 0, total: Number(p.total) || 0 });
+      } catch {
+        /* valeur illisible : on la réécrira */
+      }
+    }
+    // On ne crée pas de clé vide : si aucun don et rien en base, on n'écrit rien.
+    if (donationsValue !== prevDonationsValue && !(donationCount === 0 && prevDonationsValue === null)) {
+      writes.push(
+        env.DB.prepare(
+          "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        ).bind(donationsKey, donationsValue)
+      );
+    }
+
     const nowISO = new Date().toISOString();
     writes.push(
       env.DB.prepare(
@@ -205,14 +285,16 @@ export async function onRequestPost({ request, env }) {
 
     // Une seule opération D1 groupée (les quotas d'écritures sont désormais
     // appliqués strictement). Une synchro où rien n'a bougé n'écrit que la
-    // clé de date de synchro.
+    // clé de date de synchro (et éventuellement le recalage season_key à 0 ligne).
     await env.DB.batch(writes);
 
     return json({
       created,
       updated,
       removed,
-      unknownTiers: [...unknownTiers.entries()].map(([tierName, count]) => ({ tierName, count })),
+      unknownTiers: [...unknownTiers.values()].map((u) => ({ tierName: u.tierName, type: u.type, count: u.count })),
+      donations: { count: donationCount, total: Math.round(donationTotal * 100) / 100 },
+      season: formSeason,
       lastSync: nowISO,
     });
   } catch (err) {

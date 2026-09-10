@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Plus, Heart, Trash2, Pencil, X, RefreshCw,
-  ChevronLeft, ChevronRight, CalendarDays, Check, Tags,
+  ChevronLeft, ChevronRight, ChevronDown, CalendarDays, Check, Tags,
   Users, Wallet, Scale, Lock, Unlock, Loader2, Home, Search, MapPin, List,
   Landmark, FileDown, FileSpreadsheet, ExternalLink, AlertTriangle,
   ReceiptText, Eye, EyeOff, BookOpen, Menu, Beef, Layers,
@@ -44,8 +44,6 @@ const MEMBERSHIP_TYPES = {
 };
 // Deux tarifs, en plus des deux types. « Non précisé » = null (défaut).
 const TARIF_LABELS = { plein: "Plein", jeune: "Jeune" };
-// Mois d'une saison, de septembre (index 0) à août (index 11), pour le graphe.
-const SEASON_MONTHS_SHORT = ["S", "O", "N", "D", "J", "F", "M", "A", "M", "J", "J", "A"];
 const SEASON_MONTHS_LABEL = ["sept.", "oct.", "nov.", "déc.", "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août"];
 
 const STATUSES = {
@@ -583,12 +581,19 @@ export default function App() {
   const [membersError, setMembersError] = useState("");
   const [membSummary, setMembSummary] = useState([]);
   const [membModal, setMembModal] = useState(null);
-  const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", tendido: [], practicos: [] });
+  // Deux listes de relance, par personne (point 4).
+  const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", previousSeason: "", toRelance: [], perdus: [] });
+  const [relanceFilter, setRelanceFilter] = useState("all"); // all | tendido | practicos
+  const [perdusOpen, setPerdusOpen] = useState(false);
+  // Montants de cotisations de la saison affichée (source unique serveur) :
+  // repris en compta (HelloAsso), hors compta (manuels), sans montant, dons.
+  const [membRevenue, setMembRevenue] = useState(null);
   // Synchronisation HelloAsso des adhésions (non bloquante).
   const [membSync, setMembSync] = useState({ status: "idle", lastSync: null, message: "", error: "" });
-  // Données du graphique d'évolution mensuelle (par saison) + filtre de type.
-  const [membMonthly, setMembMonthly] = useState([]);
+  // Données du graphique d'évolution hebdomadaire (par saison) + filtre de type.
+  const [membWeekly, setMembWeekly] = useState([]);
   const [chartTypeFilter, setChartTypeFilter] = useState("all");
+  const [chartHoverWeek, setChartHoverWeek] = useState(null); // survol/toucher
 
   // Comptabilité : plan de comptes, journal (manuel + événements de la
   // Frise), compte de résultat calculé et bilan assisté, sur la même
@@ -598,6 +603,9 @@ export default function App() {
   const [acctEntries, setAcctEntries] = useState([]);
   const [acctResult, setAcctResult] = useState(null);
   const [acctBalance, setAcctBalance] = useState(null);
+  // Montants de cotisations de l'exercice (source unique) : sert à la note
+  // « dons » du journal et au garde-fou d'écart avec les lignes 7562.
+  const [acctRevenue, setAcctRevenue] = useState(null);
   const [balanceDraft, setBalanceDraft] = useState(null);
   const [balanceDirty, setBalanceDirty] = useState(false);
   const [balanceSaving, setBalanceSaving] = useState(false);
@@ -698,18 +706,27 @@ export default function App() {
   const loadNonRenewed = useCallback(async () => {
     try {
       const data = await api.getNonRenewed();
-      setNonRenewed(data || { currentSeason: "", tendido: [], practicos: [] });
+      setNonRenewed(data || { currentSeason: "", previousSeason: "", toRelance: [], perdus: [] });
     } catch {
-      /* la liste « À relancer » reste telle quelle si la requête échoue */
+      /* les listes de relance restent telles quelles si la requête échoue */
     }
   }, []);
 
-  const loadMonthly = useCallback(async () => {
+  const loadWeekly = useCallback(async () => {
     try {
-      const data = await api.getMembershipsMonthly();
-      setMembMonthly(data?.seasons || []);
+      const data = await api.getMembershipsWeekly();
+      setMembWeekly(data?.seasons || []);
     } catch {
       /* le graphique reste tel quel si la requête échoue */
+    }
+  }, []);
+
+  const loadMembRevenue = useCallback(async (season) => {
+    try {
+      const data = await api.getMembershipRevenue(season);
+      setMembRevenue(data || null);
+    } catch {
+      /* les montants restent tels quels si la requête échoue */
     }
   }, []);
 
@@ -744,24 +761,28 @@ export default function App() {
       loadMembers(season || globalSeasonKey);
       loadMembSummary();
       loadNonRenewed();
-      loadMonthly();
+      loadWeekly();
+      loadMembRevenue(season || globalSeasonKey);
     } catch (e) {
       if (e.unauthorized) { clearCode(); setAuthState("needed"); return; }
       setMembSync((s) => ({ ...s, status: "error", error: "Synchronisation HelloAsso indisponible pour le moment." }));
     }
-  }, [globalSeasonKey, loadMembers, loadMembSummary, loadNonRenewed, loadMonthly]);
+  }, [globalSeasonKey, loadMembers, loadMembSummary, loadNonRenewed, loadWeekly, loadMembRevenue]);
 
   useEffect(() => {
-    if (authState === "ok" && view === "adhesions") loadMembers(globalSeasonKey);
-  }, [authState, view, globalSeasonKey, loadMembers]);
+    if (authState === "ok" && view === "adhesions") {
+      loadMembers(globalSeasonKey);
+      loadMembRevenue(globalSeasonKey);
+    }
+  }, [authState, view, globalSeasonKey, loadMembers, loadMembRevenue]);
 
   useEffect(() => {
     if (authState === "ok" && view === "adhesions") {
       loadMembSummary();
       loadNonRenewed();
-      loadMonthly();
+      loadWeekly();
     }
-  }, [authState, view, loadMembSummary, loadNonRenewed, loadMonthly]);
+  }, [authState, view, loadMembSummary, loadNonRenewed, loadWeekly]);
 
   // À l'ouverture de la page Adhésions : synchro automatique sans force (le
   // garde-fou d'une heure fait que, le plus souvent, l'appel revient
@@ -779,16 +800,18 @@ export default function App() {
     setAcctError("");
     setAcctLoading(true);
     try {
-      const [accounts, entries, result, balance] = await Promise.all([
+      const [accounts, entries, result, balance, revenue] = await Promise.all([
         api.listAccounts(),
         api.listEntries(exercise),
         api.getAcctResult(exercise),
         api.getAcctBalance(exercise),
+        api.getMembershipRevenue(exercise),
       ]);
       setAcctAccounts(accounts || []);
       setAcctEntries(entries || []);
       setAcctResult(result || null);
       setAcctBalance(balance || null);
+      setAcctRevenue(revenue || null);
       setBalanceDraft(balance || null);
       setBalanceDirty(false);
       setOpeningEditing(Boolean(balance?.needsFirstEntry));
@@ -1124,6 +1147,15 @@ export default function App() {
       ...((acctBalance.manualLiabilities || []).map((l) => [l.label, (Number(l.amount) || 0).toFixed(2)])),
       ["Total passif", acctBalance.totalPassif.toFixed(2)],
     ];
+    // Mention informative (point 1) : cotisations de la saison suivante
+    // encaissées avant le 31 août. N'ajoute aucun chiffre au bilan.
+    if (acctBalance.nextSeasonEarly && acctBalance.nextSeasonEarly.total > 0) {
+      rows.push(
+        [],
+        ["Information"],
+        [`Cotisations de la saison suivante encaissées avant le 31 août : ${acctBalance.nextSeasonEarly.total.toFixed(2)} € (${acctBalance.nextSeasonEarly.count} adhésion${acctBalance.nextSeasonEarly.count > 1 ? "s" : ""}). Présentes en banque à la clôture, rattachées à l'exercice suivant par décision du bureau.`]
+      );
+    }
     const csv = rows.map((r) => r.map(csvCell).join(";")).join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1328,6 +1360,8 @@ export default function App() {
       setMembModal(null);
       loadMembSummary();
       loadNonRenewed();
+      loadWeekly();
+      loadMembRevenue(globalSeasonKey);
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -1339,6 +1373,8 @@ export default function App() {
       setMembers((list) => list.filter((m) => m.id !== id));
       loadMembSummary();
       loadNonRenewed();
+      loadWeekly();
+      loadMembRevenue(globalSeasonKey);
     } catch (e) {
       alert("Erreur : " + e.message);
     }
@@ -1370,37 +1406,54 @@ export default function App() {
 
   const membHistMax = Math.max(1, ...membSummary.flatMap((s) => [s.tendido, s.practicos]));
 
-  // Données du graphique d'évolution mensuelle : la saison en cours + les deux
-  // précédentes, superposées. Courbes cumulées (sept → août) construites à
-  // partir de joined_date. Les adhérents sans date ne sont pas représentés.
+  // Données du graphique d'évolution HEBDOMADAIRE : la saison en cours + les
+  // deux précédentes, superposées. Semaines de 7 jours à partir du 1er sept
+  // (comparables d'une saison à l'autre). Courbes cumulées. Les adhésions sans
+  // date ne sont pas représentées ; celles réglées avant le 1er sept comptent
+  // en semaine 1. La courbe de la saison en cours s'arrête à la semaine actuelle.
   const membChart = useMemo(() => {
+    const WEEKS = 52;
     const cur = seasonStartYear(globalSeasonKey);
     const keys = [seasonKeyFromStart(cur - 2), seasonKeyFromStart(cur - 1), seasonKeyFromStart(cur)];
     const byKey = {};
-    for (const s of membMonthly) byKey[s.season] = s;
+    for (const s of membWeekly) byKey[s.season] = s;
+    const useType = (t) => chartTypeFilter === "all" || chartTypeFilter === t;
+
+    // Semaine en cours de la saison affichée (index 0..51).
+    const seasonStart = Date.UTC(cur, 8, 1); // 1er septembre
+    let currentWeek = Math.floor((Date.now() - seasonStart) / (7 * 24 * 60 * 60 * 1000));
+    if (currentWeek < 0) currentWeek = 0;
+    if (currentWeek > WEEKS - 1) currentWeek = WEEKS - 1;
+
     let noDate = 0;
+    let beforeSept = 0;
     const series = keys.map((key) => {
       const s = byKey[key];
-      const monthly = Array(12).fill(0);
+      const weekly = Array(WEEKS).fill(0);
       if (s) {
-        for (let i = 0; i < 12; i++) {
-          if (chartTypeFilter === "all" || chartTypeFilter === "tendido") monthly[i] += s.monthly.tendido[i] || 0;
-          if (chartTypeFilter === "all" || chartTypeFilter === "practicos") monthly[i] += s.monthly.practicos[i] || 0;
+        for (let i = 0; i < WEEKS; i++) {
+          if (useType("tendido")) weekly[i] += (s.weekly.tendido && s.weekly.tendido[i]) || 0;
+          if (useType("practicos")) weekly[i] += (s.weekly.practicos && s.weekly.practicos[i]) || 0;
         }
         const nd = s.noDate || { tendido: 0, practicos: 0 };
-        if (chartTypeFilter === "all" || chartTypeFilter === "tendido") noDate += nd.tendido || 0;
-        if (chartTypeFilter === "all" || chartTypeFilter === "practicos") noDate += nd.practicos || 0;
+        if (useType("tendido")) noDate += nd.tendido || 0;
+        if (useType("practicos")) noDate += nd.practicos || 0;
+        const bs = s.beforeSept || { tendido: 0, practicos: 0 };
+        if (useType("tendido")) beforeSept += bs.tendido || 0;
+        if (useType("practicos")) beforeSept += bs.practicos || 0;
       }
-      // Cumul mois par mois.
+      const isCurrent = key === globalSeasonKey;
+      // La saison en cours s'arrête à la semaine actuelle (pas de plat jusqu'en août).
+      const lastWeek = isCurrent ? currentWeek : WEEKS - 1;
       const cumulative = [];
       let run = 0;
-      for (let i = 0; i < 12; i++) { run += monthly[i]; cumulative.push(run); }
-      return { season: key, cumulative, isCurrent: key === globalSeasonKey, total: run };
+      for (let i = 0; i <= lastWeek; i++) { run += weekly[i]; cumulative.push(run); }
+      return { season: key, cumulative, isCurrent, total: run, lastWeek };
     });
     const max = Math.max(1, ...series.flatMap((s) => s.cumulative));
     const hasData = series.some((s) => s.total > 0);
-    return { series, max, noDate, hasData };
-  }, [membMonthly, globalSeasonKey, chartTypeFilter]);
+    return { series, max, noDate, beforeSept, currentWeek, weeks: WEEKS, hasData };
+  }, [membWeekly, globalSeasonKey, chartTypeFilter]);
 
   const persistMeta = async (next) => {
     setMeta(next);
@@ -1530,7 +1583,7 @@ export default function App() {
         <button className="cf-btn cf-btn-ghost"
           onClick={() => {
             loadState();
-            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); loadMonthly(); }
+            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); loadWeekly(); loadMembRevenue(globalSeasonKey); }
             if (view === "compta") loadAcctAll(globalSeasonKey);
             if (view === "ganaderias") setGanadRefresh((n) => n + 1);
           }}
@@ -1847,7 +1900,9 @@ export default function App() {
               <AlertTriangle size={14} />
               <span>
                 {membSync.unknownTiers.reduce((n, u) => n + u.count, 0)} adhésion(s) avec un tarif non reconnu :{" "}
-                {membSync.unknownTiers.map((u) => `« ${u.tierName} » (${u.count})`).join(", ")}.
+                {membSync.unknownTiers.map((u) => (u.tierName && u.tierName.trim() !== ""
+                  ? `« ${u.tierName} » (${u.count})`
+                  : `(sans libellé — type : ${u.type || "inconnu"}) (${u.count})`)).join(", ")}.
                 Signale-le pour que la correspondance soit ajoutée.
               </span>
             </div>
@@ -1878,13 +1933,26 @@ export default function App() {
                 </tr>
               </tbody>
             </table>
+            {/* Deux lignes distinctes (point 3) : ce qui est repris en compta
+                (HelloAsso, == lignes 7562) et ce qui reste hors compta (saisi
+                à la main). Chiffres issus de la source unique côté serveur. */}
             <div className="cf-stat net" style={{ marginTop: 10 }}>
-              <span><Wallet size={13} /> Montant encaissé sur la saison</span>
-              <span className="val">{eur(membTotals.encaisse)}</span>
+              <span><Wallet size={13} /> Encaissé via HelloAsso — repris en comptabilité (7562)</span>
+              <span className="val">{eur(membRevenue ? membRevenue.helloasso.total : 0)}</span>
             </div>
-            {membTotals.sansMontant > 0 && (
+            <div className="cf-stat" style={{ marginTop: 6 }}>
+              <span><Wallet size={13} /> Montants saisis à la main — hors comptabilité</span>
+              <span className="val">{eur(membRevenue ? membRevenue.manual.total : 0)}</span>
+            </div>
+            {membRevenue && membRevenue.noAmountCount > 0 && (
               <span className="cf-hint" style={{ marginTop: 6 }}>
-                {membTotals.sansMontant} adhésion{membTotals.sansMontant > 1 ? "s" : ""} sans montant connu : ce total n'est pas exhaustif.
+                {membRevenue.noAmountCount} adhésion{membRevenue.noAmountCount > 1 ? "s" : ""} sans montant connu : ces totaux ne sont pas exhaustifs.
+              </span>
+            )}
+            {/* Dons reçus avec les adhésions (point 2) — hors cotisations. */}
+            {membRevenue && membRevenue.donations && membRevenue.donations.count > 0 && (
+              <span className="cf-hint" style={{ marginTop: 6 }}>
+                Dons reçus avec les adhésions cette saison : {membRevenue.donations.count} don{membRevenue.donations.count > 1 ? "s" : ""} · {eur(membRevenue.donations.total)} (hors cotisations).
               </span>
             )}
           </div>
@@ -1940,7 +2008,7 @@ export default function App() {
 
           <div className="cf-rule" />
           <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Évolution</span>
-          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Rythme des adhésions, mois par mois</h3>
+          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Rythme des adhésions, semaine par semaine</h3>
           <div className="cf-controls" style={{ margin: "0 0 6px" }}>
             <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
               <button className="cf-sf" aria-pressed={chartTypeFilter === "all"} onClick={() => setChartTypeFilter("all")}>Tous</button>
@@ -1965,24 +2033,57 @@ export default function App() {
                   </span>
                 ))}
               </div>
-              <div className="cf-memb-chart">
+              <div className="cf-memb-chart" style={{ position: "relative" }}>
                 {(() => {
+                  const WEEKS = membChart.weeks;
                   const W = 340, H = 190, padL = 28, padR = 10, padT = 12, padB = 24;
                   const plotW = W - padL - padR, plotH = H - padT - padB;
-                  const xAt = (i) => padL + (i * plotW) / 11;
+                  const xAt = (i) => padL + (i * plotW) / (WEEKS - 1);
                   const yAt = (v) => padT + plotH * (1 - v / membChart.max);
                   const colorFor = (idx, isCurrent) => (isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c");
+                  // Étiquettes de mois placées sur la semaine où commence chaque
+                  // mois (repère saison en cours). Un trait vertical léger par mois.
+                  const cur = seasonStartYear(globalSeasonKey);
+                  const seasonStart = Date.UTC(cur, 8, 1);
+                  const MONTHS = ["SEPT", "OCT", "NOV", "DÉC", "JAN", "FÉV", "MAR", "AVR", "MAI", "JUIN", "JUIL", "AOÛT"];
+                  const monthTicks = MONTHS.map((lab, k) => {
+                    const d = Date.UTC(cur + (k >= 4 ? 1 : 0), (8 + k) % 12, 1);
+                    let wk = Math.floor((d - seasonStart) / (7 * 24 * 60 * 60 * 1000));
+                    if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
+                    return { lab, wk };
+                  });
+                  // Semaine survolée / touchée : calcul robuste via les
+                  // dimensions réelles du SVG (viewBox mis à l'échelle).
+                  const onMove = (e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+                    const x = ((clientX - rect.left) / rect.width) * W;
+                    let wk = Math.round(((x - padL) / plotW) * (WEEKS - 1));
+                    if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
+                    setChartHoverWeek(wk);
+                  };
+                  const hw = chartHoverWeek;
                   return (
-                    <svg viewBox={`0 0 ${W} ${H}`} className="cf-memb-svg" role="img" aria-label="Évolution mensuelle des adhésions">
+                    <svg viewBox={`0 0 ${W} ${H}`} className="cf-memb-svg" role="img" aria-label="Évolution hebdomadaire des adhésions"
+                      style={{ touchAction: "none" }}
+                      onMouseMove={onMove} onMouseLeave={() => setChartHoverWeek(null)}
+                      onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={() => setChartHoverWeek(null)}>
                       {/* Repères horizontaux + valeurs 0 et max. */}
                       <line x1={padL} y1={yAt(0)} x2={W - padR} y2={yAt(0)} className="cf-chart-axis" />
                       <line x1={padL} y1={yAt(membChart.max)} x2={W - padR} y2={yAt(membChart.max)} className="cf-chart-grid" />
                       <text x={padL - 5} y={yAt(0) + 3} className="cf-chart-ylab" textAnchor="end">0</text>
                       <text x={padL - 5} y={yAt(membChart.max) + 3} className="cf-chart-ylab" textAnchor="end">{membChart.max}</text>
-                      {/* Étiquettes des mois (sept → août). */}
-                      {SEASON_MONTHS_SHORT.map((lab, i) => (
-                        <text key={i} x={xAt(i)} y={H - 8} className="cf-chart-xlab" textAnchor="middle">{lab}</text>
+                      {/* Traits + étiquettes par mois (pas d'étiquette par semaine). */}
+                      {monthTicks.map((m, i) => (
+                        <g key={i}>
+                          <line x1={xAt(m.wk)} y1={yAt(membChart.max)} x2={xAt(m.wk)} y2={yAt(0)} className="cf-chart-grid" style={{ opacity: 0.4 }} />
+                          <text x={xAt(m.wk)} y={H - 8} className="cf-chart-xlab" textAnchor="middle">{m.lab}</text>
+                        </g>
                       ))}
+                      {/* Curseur vertical au survol / toucher. */}
+                      {hw != null && (
+                        <line x1={xAt(hw)} y1={yAt(membChart.max)} x2={xAt(hw)} y2={yAt(0)} className="cf-chart-axis" style={{ opacity: 0.55 }} />
+                      )}
                       {/* Une courbe cumulée par saison ; la saison en cours passe en dernier (au-dessus). */}
                       {membChart.series.map((s, idx) => (
                         <polyline
@@ -1992,7 +2093,41 @@ export default function App() {
                           style={{ stroke: colorFor(idx, s.isCurrent), strokeWidth: s.isCurrent ? 2.6 : 1.5, opacity: s.isCurrent ? 1 : 0.85 }}
                         />
                       ))}
+                      {/* Point de lecture sur chaque courbe à la semaine survolée. */}
+                      {hw != null && membChart.series.map((s, idx) => {
+                        const i = Math.min(hw, s.lastWeek);
+                        if (i < 0 || i >= s.cumulative.length) return null;
+                        return <circle key={s.season} cx={xAt(hw)} cy={yAt(s.cumulative[i])} r={s.isCurrent ? 3 : 2.2} style={{ fill: colorFor(idx, s.isCurrent) }} />;
+                      })}
                     </svg>
+                  );
+                })()}
+                {/* Infobulle de lecture : semaine + cumul par saison affichée. */}
+                {chartHoverWeek != null && (() => {
+                  const cur = seasonStartYear(globalSeasonKey);
+                  const seasonStart = Date.UTC(cur, 8, 1);
+                  const wStart = new Date(seasonStart + chartHoverWeek * 7 * 24 * 60 * 60 * 1000);
+                  const wEnd = new Date(seasonStart + (chartHoverWeek * 7 + 6) * 24 * 60 * 60 * 1000);
+                  const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", timeZone: "UTC" });
+                  const dayMonthFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
+                  const sameMonth = wStart.getUTCMonth() === wEnd.getUTCMonth();
+                  const range = sameMonth
+                    ? `${dayFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`
+                    : `${dayMonthFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`;
+                  const left = chartHoverWeek <= (membChart.weeks - 1) / 2;
+                  return (
+                    <div className="cf-chart-tip" style={{
+                      position: "absolute", top: 6, [left ? "right" : "left"]: 8,
+                      background: "rgba(28,22,18,0.92)", color: "#f4ece0", padding: "6px 9px",
+                      borderRadius: 6, fontSize: 11, lineHeight: 1.5, pointerEvents: "none", maxWidth: 170,
+                    }}>
+                      <div style={{ fontWeight: 700, marginBottom: 2 }}>Semaine du {range}</div>
+                      {membChart.series.filter((s) => s.total > 0 || s.isCurrent).map((s) => {
+                        const i = Math.min(chartHoverWeek, s.lastWeek);
+                        const val = i >= 0 && i < s.cumulative.length ? s.cumulative[i] : 0;
+                        return <div key={s.season}>{s.season} : <b>{val}</b></div>;
+                      })}
+                    </div>
                   );
                 })()}
               </div>
@@ -2001,35 +2136,89 @@ export default function App() {
                   {membChart.noDate} adhérent{membChart.noDate > 1 ? "s" : ""} sans date d'adhésion {membChart.noDate > 1 ? "ne sont pas représentés" : "n'est pas représenté"} sur ce graphique.
                 </span>
               )}
+              {membChart.beforeSept > 0 && (
+                <span className="cf-hint">
+                  dont {membChart.beforeSept} adhésion{membChart.beforeSept > 1 ? "s" : ""} réglée{membChart.beforeSept > 1 ? "s" : ""} avant le 1er septembre, comptée{membChart.beforeSept > 1 ? "s" : ""} en semaine 1.
+                </span>
+              )}
             </>
           )}
 
+          {/* Liste 1 — À relancer : adhérents de la saison dernière (présents
+              en N-1, absents en N), une ligne par personne, filtrable par type
+              pris en N-1. Dépliée par défaut : elle se vide au fil des renouv. */}
           <div className="cf-rule" />
           <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>À relancer</span>
           <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>
-            Non renouvelés{nonRenewed.currentSeason ? ` pour ${nonRenewed.currentSeason}` : ""}
+            Adhérents de la saison dernière{nonRenewed.previousSeason ? ` (${nonRenewed.previousSeason})` : ""}
           </h3>
-          <div className="cf-nr-grid">
-            {["tendido", "practicos"].map((type) => {
-              const t = MEMBERSHIP_TYPES[type];
-              const list = nonRenewed[type] || [];
-              return (
-                <div className="cf-nr-col" key={type}>
-                  <div className="cf-nr-head"><span className="dot" style={{ background: t.color }} />{t.label}</div>
-                  {list.length === 0 ? (
-                    <div className="cf-nr-empty">Tout le monde a renouvelé pour l'instant.</div>
-                  ) : (
-                    list.map((m) => (
-                      <div className="cf-nr-row" key={`${m.first_name}-${m.last_name}`}>
-                        <span className="cf-memb-name" title={`${m.first_name} ${m.last_name}`}>{m.first_name} {m.last_name}</span>
-                        <span className="cf-nr-lastseason">Dernière saison : {m.last_season}</span>
-                      </div>
-                    ))
-                  )}
+          {(() => {
+            const list = (nonRenewed.toRelance || []).filter(
+              (p) => relanceFilter === "all" || (p.badges || []).some((b) => b.type === relanceFilter)
+            );
+            return (
+              <>
+                <div className="cf-controls" style={{ margin: "0 0 6px" }}>
+                  <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+                    <button className="cf-sf" aria-pressed={relanceFilter === "all"} onClick={() => setRelanceFilter("all")}>Tous</button>
+                    <button className="cf-sf" aria-pressed={relanceFilter === "tendido"} onClick={() => setRelanceFilter("tendido")}>Tendido</button>
+                    <button className="cf-sf" aria-pressed={relanceFilter === "practicos"} onClick={() => setRelanceFilter("practicos")}>Prácticos</button>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
+                <span className="cf-search-count">
+                  {list.length} adhérent{list.length > 1 ? "s" : ""} de {nonRenewed.previousSeason || "la saison dernière"}{" "}
+                  {list.length > 1 ? "n'ont pas encore renouvelé" : "n'a pas encore renouvelé"}
+                </span>
+                {list.length === 0 ? (
+                  <div className="cf-empty" style={{ flex: "none" }}>
+                    <span>Personne à relancer pour ce filtre — tout le monde a renouvelé.</span>
+                  </div>
+                ) : (
+                  <div className="cf-memb-list">
+                    {list.map((p) => (
+                      <div className="cf-memb-row" key={`${p.first_name}-${p.last_name}`}>
+                        <span className="cf-nr-badges" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                          {(p.badges || []).map((b) => (
+                            <span className="cf-memb-type" key={b.type} style={{ background: (MEMBERSHIP_TYPES[b.type] || NEUTRAL).color }}>
+                              {(MEMBERSHIP_TYPES[b.type] || NEUTRAL).label}{b.tarif ? ` · ${(TARIF_LABELS[b.tarif] || "").toLowerCase()}` : ""}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="cf-memb-name" title={`${p.first_name} ${p.last_name}`}>{p.first_name} {p.last_name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
+          {/* Liste 2 — Perdus de vue : absents en N ET N-1, présents sur une
+              saison antérieure. Repliée par défaut, triée du plus récent. */}
+          <div className="cf-rule" />
+          <button className="cf-nr-toggle" onClick={() => setPerdusOpen((o) => !o)} aria-expanded={perdusOpen}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit", padding: 0 }}>
+            {perdusOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+            <span className="cf-display" style={{ fontSize: 22 }}>Perdus de vue ({(nonRenewed.perdus || []).length})</span>
+          </button>
+          {perdusOpen && (
+            (nonRenewed.perdus || []).length === 0 ? (
+              <div className="cf-empty" style={{ flex: "none", marginTop: 8 }}>
+                <span>Personne — les anciens adhérents sont revenus depuis.</span>
+              </div>
+            ) : (
+              <div className="cf-memb-list" style={{ marginTop: 8 }}>
+                {nonRenewed.perdus.map((p) => (
+                  <div className="cf-memb-row" key={`${p.first_name}-${p.last_name}`}>
+                    <span className="cf-memb-name" title={`${p.first_name} ${p.last_name}`}>{p.first_name} {p.last_name}</span>
+                    <span className="cf-nr-lastseason">
+                      Dernière adhésion : {p.last_season} · {(p.badges || []).map((b) => (MEMBERSHIP_TYPES[b.type] || NEUTRAL).label).join(", ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
 
           <div className="cf-rule" />
           <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>
@@ -2143,6 +2332,32 @@ export default function App() {
                       <span>
                         Le compte 7562 contient {membDupAlert.manual} ligne{membDupAlert.manual > 1 ? "s" : ""} manuelle{membDupAlert.manual > 1 ? "s" : ""} et {membDupAlert.auto} ligne{membDupAlert.auto > 1 ? "s" : ""} automatique{membDupAlert.auto > 1 ? "s" : ""} issue{membDupAlert.auto > 1 ? "s" : ""} des adhésions HelloAsso sur cet exercice. Vérifie qu'il n'y a pas de double comptage.
                       </span>
+                    </div>
+                  )}
+
+                  {/* Garde-fou (point 3) : écart éventuel entre le montant
+                      HelloAsso de la page Adhésions et la somme des lignes
+                      automatiques 7562. Normalement nul (source unique) ; on
+                      alerte sans jamais corriger automatiquement. */}
+                  {(acctKindFilter === "all" || acctKindFilter === "produit") && acctRevenue && (() => {
+                    const autoTotal = acctEntries.reduce(
+                      (s, e) => s + ((e.source === "membership" && e.accountCode === "7562") ? Number(e.amount) || 0 : 0), 0
+                    );
+                    const ecart = Math.round((acctRevenue.helloasso.total - autoTotal) * 100) / 100;
+                    if (Math.abs(ecart) < 0.01) return null;
+                    return (
+                      <div className="cf-note warn">
+                        <AlertTriangle size={14} />
+                        <span>⚠️ Écart de {eur(Math.abs(ecart))} entre les cotisations HelloAsso de la page Adhésions et les lignes automatiques du compte 7562.</span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Note dons (point 2) : information, pas une ligne d'écriture.
+                      Le trésorier garde la main (Chemin B). */}
+                  {(acctKindFilter === "all" || acctKindFilter === "produit") && acctRevenue?.donations?.count > 0 && (
+                    <div className="cf-note">
+                      <span>ℹ️ {eur(acctRevenue.donations.total)} de dons ont été versés avec des adhésions HelloAsso sur cet exercice. Ils ne sont pas repris automatiquement : à saisir par le trésorier sur le compte de dons approprié.</span>
                     </div>
                   )}
 
@@ -2319,6 +2534,18 @@ export default function App() {
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Mention informative (point 1) : cotisations de la saison
+                      suivante encaissées avant le 31 août — présentes en banque
+                      à la clôture mais rattachées à l'exercice suivant. Aucun
+                      chiffre du bilan n'est modifié ; affichée si > 0. */}
+                  {acctBalance.nextSeasonEarly && acctBalance.nextSeasonEarly.total > 0 && (
+                    <div className="cf-note" style={{ marginBottom: 12 }}>
+                      <span>
+                        Cotisations de la saison suivante encaissées avant le 31 août : {eur(acctBalance.nextSeasonEarly.total)} ({acctBalance.nextSeasonEarly.count} adhésion{acctBalance.nextSeasonEarly.count > 1 ? "s" : ""}). Présentes en banque à la clôture, rattachées à l'exercice suivant par décision du bureau.
+                      </span>
                     </div>
                   )}
 

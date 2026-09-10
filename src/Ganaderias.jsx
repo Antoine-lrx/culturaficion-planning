@@ -353,7 +353,7 @@ export default function Ganaderias({ onUnauthorized, refreshKey }) {
                   <span className="stripe" style={{ background: st.color }} />
                   <div className="cf-search-card-main">
                     <div className="cf-card-title">{g.name}</div>
-                    <div className="cf-ganad-loc"><MapPin size={12} /> {place}</div>
+                    <div className="cf-ganad-loc"><MapPin size={12} /> <span className="cf-ganad-loc-text">{place}</span></div>
                     <div className="cf-card-meta">
                       <span className="cf-pill" style={{ color: st.color }}>{st.label}</span>
                       {g.contactName && <span>{g.contactName}</span>}

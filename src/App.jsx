@@ -31,7 +31,6 @@ const NEW_CAT_COLORS = ["#9E5BA8", "#C77F1A", "#5E7D8A", "#A23E5C", "#3F6E55", "
 
 const NAV_ITEMS = [
   { id: "accueil",   label: "Accueil",       Icon: Home },
-  { id: "liste",     label: "Liste",         Icon: List },
   { id: "frise",     label: "Frise",         Icon: CalendarDays },
   { id: "adhesions", label: "Adhésions",     Icon: Users },
   { id: "compta",    label: "Comptabilité",  Icon: Landmark },
@@ -513,11 +512,26 @@ html, body{
   .cf-me input{width:96px}
   .cf-statusfilter{margin-left:0}
   .cf-search-card{flex-direction:column;align-items:flex-start}
+  /* En colonne, le contenu principal ne doit plus hériter du flex-basis de
+     220px (pensé pour la disposition horizontale sur ordinateur) : sinon il
+     impose une hauteur de 220px et laisse un grand vide sous les cartes. On
+     revient à une hauteur qui épouse le contenu, sur toute la largeur. */
+  .cf-search-card-main{flex:1 1 auto;width:100%;min-width:0}
+  /* Onglets / sous-navigation (Comptabilité, Résultat, Ganaderías) : une
+     rangée de puces qui défile horizontalement dans son propre cadre, au
+     lieu d'élargir toute la page. */
+  .cf-viewtoggle{max-width:100%;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .cf-viewtoggle .cf-vt{flex:none;white-space:nowrap}
+  /* Lignes de saisie du bilan : le libellé peut rétrécir (pas de largeur
+     minimale intrinsèque) pour ne jamais déborder de l'écran. */
+  .cf-bilan-manual-row input.lab2{min-width:0}
   /* Tuiles ganaderías compactes sur mobile : moins de padding, hauteur
-     libre, ville affichée, actions (modifier/supprimer) toujours visibles. */
+     libre, ville affichée, actions (modifier/supprimer) toujours visibles.
+     Nom et ville sur une seule ligne, coupés avec « … » si trop longs. */
   .cf-ganad-card{padding:9px 12px 9px 16px;gap:2px}
-  .cf-ganad-card .cf-card-title{font-size:13.5px;padding-right:60px}
-  .cf-ganad-card .cf-ganad-loc{margin:0 0 3px;font-size:11.5px}
+  .cf-ganad-card .cf-card-title{font-size:13.5px;padding-right:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .cf-ganad-card .cf-ganad-loc{margin:0 0 3px;font-size:11.5px;display:flex;max-width:100%;min-width:0}
+  .cf-ganad-card .cf-ganad-loc .cf-ganad-loc-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .cf-ganad-card .cf-card-actions{opacity:1;top:8px;right:8px}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
   .cf-memb-row{flex-wrap:wrap}
@@ -552,11 +566,10 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [codeInput, setCodeInput] = useState("");
 
-  // "accueil" (recherche rapide) | "liste" (parcours filtrable) | "frise" (planning 12 mois)
+  // "accueil" (recherche rapide) | "frise" (planning 12 mois)
   const [view, setView] = useState("accueil");
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const [accueilQuery, setAccueilQuery] = useState("");
-  const [listSearch, setListSearch] = useState("");
 
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATS);
@@ -1500,16 +1513,6 @@ export default function App() {
       .slice(0, 8);
   }, [events, accueilQuery]);
 
-  const listResults = useMemo(() => {
-    const q = normalize(listSearch.trim());
-    const base = q ? visible.filter((e) => normalize(e.title).includes(q)) : visible;
-    return [...base].sort((a, b) => {
-      const ak = (a.monthKey || "") + (a.date || "");
-      const bk = (b.monthKey || "") + (b.date || "");
-      return ak.localeCompare(bk);
-    });
-  }, [visible, listSearch]);
-
   if (authState === "checking") {
     return (
       <div className="cf-root">
@@ -1663,98 +1666,6 @@ export default function App() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {view === "liste" && (
-        <div className="cf-controls">
-          <div className="cf-legend">
-            {categories.map((c) => (
-              <button key={c.id} className="cf-chip" aria-pressed={!hiddenTypes.has(c.id)} onClick={() => toggleHidden(c.id)}>
-                <span className="dot" style={{ background: c.color }} />
-                {c.label}
-              </button>
-            ))}
-            <button className="cf-chip manage" onClick={() => setCatModal(true)}>
-              <Tags size={13} /> Catégories
-            </button>
-          </div>
-          <div className="cf-statusfilter">
-            {STATUS_KEYS.map((k) => (
-              <button key={k} className="cf-sf" aria-pressed={statusFilter.has(k)} onClick={() => toggleStatus(k)}>
-                {STATUSES[k].label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {view === "liste" && (
-        <div className="cf-home">
-          <div className="cf-search-wrap">
-            <Search size={16} className="cf-search-icon" />
-            <input className="cf-search-input" type="search" value={listSearch}
-              onChange={(e) => setListSearch(e.target.value)}
-              placeholder="Filtrer par nom d'événement…" aria-label="Filtrer les événements par nom" />
-          </div>
-
-          {loaded && total === 0 ? (
-            <div className="cf-empty" style={{ flex: "none" }}>
-              <b>La saison est encore vierge</b>
-              <span>Posez le premier jalon : une soirée, une conférence, un tentadero… Chaque membre du bureau peut ajouter ses propositions, créer ses propres catégories et voter pour les idées des autres.</span>
-              <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={() => openAdd()}>
-                <Plus size={16} /> Premier événement
-              </button>
-            </div>
-          ) : (
-            <>
-              <span className="cf-search-count">
-                {listResults.length} événement{listResults.length > 1 ? "s" : ""}
-                {listSearch.trim() ? ` trouvé${listResults.length > 1 ? "s" : ""}` : " au programme"}
-              </span>
-              <div className="cf-search-list">
-                {listResults.map((ev) => {
-                  const t = catById[ev.type] || NEUTRAL;
-                  const st = STATUSES[ev.status] || STATUSES.idee;
-                  const when = fmtDate(ev.date);
-                  const mo = months.find((m) => m.key === ev.monthKey);
-                  const net = (Number(ev.revenue) || 0) - (Number(ev.expenses) || 0);
-                  const hasFinance = ev.revenue != null || ev.expenses != null;
-                  return (
-                    <div className="cf-search-card" key={ev.id} tabIndex={0} role="button"
-                      aria-label={"Ouvrir le bilan : " + ev.title}
-                      onClick={() => openDetail(ev)}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(ev); } }}>
-                      <span className="stripe" style={{ background: t.color, opacity: st.op }} />
-                      <div className="cf-search-card-main">
-                        <div className="cf-card-title">{ev.title}</div>
-                        <div className="cf-card-meta">
-                          {mo && <span>{MONTHS_LONG[mo.m]} {mo.y}</span>}
-                          {when && <span className="when"><CalendarDays size={12} /> {when}</span>}
-                          <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
-                          {ev.lieu && <span><MapPin size={11} style={{ verticalAlign: -1 }} /> {ev.lieu}</span>}
-                        </div>
-                      </div>
-                      <div className="cf-search-card-stats">
-                        <span className="cf-pill" style={{ color: ev.status === "confirme" ? t.color : "#9a8d7c" }}>
-                          {ev.status === "confirme" && <Check size={10} style={{ marginRight: 3, verticalAlign: -1 }} />}
-                          {st.label}
-                        </span>
-                        {ev.registered != null && <span>{ev.registered} inscrit{ev.registered > 1 ? "s" : ""}</span>}
-                        {hasFinance && <span>Recettes {eur(ev.revenue)} · Dépenses {eur(ev.expenses)}</span>}
-                        {hasFinance && (
-                          <span className={net >= 0 ? "pos" : "neg"}>Net {net > 0 ? "+" : ""}{eur(net)}</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {listResults.length === 0 && (
-                  <div className="cf-search-empty">Aucun événement ne correspond à « {listSearch} ».</div>
-                )}
-              </div>
-            </>
-          )}
         </div>
       )}
 

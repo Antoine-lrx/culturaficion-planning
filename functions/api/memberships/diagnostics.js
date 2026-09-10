@@ -83,7 +83,9 @@ export async function onRequestGet({ request, env }) {
   try {
     if (env.HELLOASSO_CLIENT_ID && env.HELLOASSO_CLIENT_SECRET && env.HELLOASSO_ORG_SLUG && env.HELLOASSO_MEMBERSHIP_FORM_SLUG) {
       const token = await getAccessToken(env);
-      const states = ["Processed", "Registered", "Canceled", "Authorized", "Refused", "Refunded", "Waiting", "Unknown"];
+      // États d'ARTICLE valides côté HelloAsso (les états Authorized/Refunded…
+      // sont des états de PAIEMENT, refusés ici par l'API).
+      const states = ["Processed", "Registered", "Unregistered", "Canceled"];
       const raw = await fetchAllItems(env, token, states);
       items = raw
         .map((it) => {

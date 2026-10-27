@@ -17,8 +17,6 @@ import { normalizePersonName } from "../../../../_lib/people.js";
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 20;
-// États d'ARTICLE acceptés par l'endpoint items (doc officielle HelloAsso).
-const ITEM_STATES = ["Processed", "Registered", "Unknown", "Canceled"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function onRequestGet({ request, env, params }) {
@@ -38,12 +36,34 @@ export async function onRequestGet({ request, env, params }) {
   const formSlug = ev.helloasso_slug;
 
   let items;
+  let withDetails = true;
+  let canceledCount = null;
   try {
     const token = await getAccessToken(env);
-    items = await fetchAll(env, token, formType, formSlug);
+    // Appel principal SANS filtre d'état (comme les chiffres du bilan, qui
+    // fonctionnent), avec withDetails=true pour obtenir les champs
+    // personnalisés. Si HelloAsso refuse withDetails, on réessaie sans pour
+    // au moins obtenir les compteurs, et on le signale.
+    try {
+      items = await fetchAll(env, token, formType, formSlug, { withDetails: true });
+    } catch (err) {
+      if (!/statut 4\d\d/.test(String(err && err.message))) throw err;
+      withDetails = false;
+      items = await fetchAll(env, token, formType, formSlug, {});
+    }
+    // Les billets annulés ne sont peut-être pas renvoyés sans filtre : on les
+    // compte à part (même filtre que la synchro des adhésions).
+    try {
+      const canceled = await fetchAll(env, token, formType, formSlug, { states: ["Canceled"] });
+      canceledCount = canceled.length;
+    } catch {
+      canceledCount = "erreur";
+    }
   } catch (err) {
     // Message technique (statut HTTP, chemin) sans aucune donnée personnelle.
-    return json({ error: "Appel HelloAsso en échec.", detail: String(err && err.message).slice(0, 300) }, { status: 502, headers });
+    // Détail technique (statut HTTP, message d'erreur HelloAsso) affiché pour
+    // le diagnostic : aucune donnée personnelle dans une réponse d'erreur.
+    return json({ error: `Appel HelloAsso en échec : ${String(err && err.message).slice(0, 300)}` }, { status: 502, headers });
   }
 
   const byState = {};
@@ -119,7 +139,9 @@ export async function onRequestGet({ request, env, params }) {
     {
       formType,
       formSlug,
+      withDetails,
       totalItems: items.length,
+      canceledViaFilter: canceledCount,
       byState,
       typesByState,
       freeByState,
@@ -142,7 +164,7 @@ export async function onRequestGet({ request, env, params }) {
   );
 }
 
-async function fetchAll(env, token, formType, formSlug) {
+async function fetchAll(env, token, formType, formSlug, { withDetails = false, states = [] } = {}) {
   const out = [];
   let continuationToken = "";
   let page = 0;
@@ -150,8 +172,8 @@ async function fetchAll(env, token, formType, formSlug) {
     page += 1;
     const url = new URL(`${API_BASE}/organizations/${env.HELLOASSO_ORG_SLUG}/forms/${formType}/${formSlug}/items`);
     url.searchParams.set("pageSize", String(PAGE_SIZE));
-    url.searchParams.set("withDetails", "true");
-    for (const s of ITEM_STATES) url.searchParams.append("itemStates", s);
+    if (withDetails) url.searchParams.set("withDetails", "true");
+    for (const s of states) url.searchParams.append("itemStates", s);
     if (continuationToken) url.searchParams.set("continuationToken", continuationToken);
 
     const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });

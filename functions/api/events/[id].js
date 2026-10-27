@@ -1,6 +1,7 @@
 import { json } from "../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../_lib/auth.js";
 import { rowToEvent } from "../../_lib/serialize.js";
+import { lastSyncKey } from "../../_lib/attendees.js";
 
 // PUT /api/events/:id — met à jour un événement (édition, vote, bilan…).
 // Seuls les champs présents dans le corps de la requête sont modifiés.
@@ -46,9 +47,14 @@ export async function onRequestPut({ request, env, params }) {
   return json(rowToEvent(row));
 }
 
-// DELETE /api/events/:id
+// DELETE /api/events/:id — supprime aussi les inscrits de l'événement (et la
+// date de leur dernière récupération), dans la même opération groupée.
 export async function onRequestDelete({ request, env, params }) {
   if (!isAuthorized(request, env)) return unauthorized();
-  await env.DB.prepare("DELETE FROM events WHERE id = ?").bind(params.id).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM events WHERE id = ?").bind(params.id),
+    env.DB.prepare("DELETE FROM event_attendees WHERE event_id = ?").bind(params.id),
+    env.DB.prepare("DELETE FROM meta WHERE key = ?").bind(lastSyncKey(params.id)),
+  ]);
   return json({ ok: true });
 }

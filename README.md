@@ -243,6 +243,13 @@ Pages (Settings → Variables et secrets), jamais commité dans le dépôt.
   `latitude`, `longitude`, `status`, `contact_name`, `contact_phone`,
   `contact_instagram`, `last_contact_date`, `comments`, `created_at`,
   `updated_at` (voir section 9).
+- `event_attendees` : inscrits d'un événement HelloAsso (une ligne par
+  billet) — `event_id`, `helloasso_item_id`, `first_name`, `last_name`,
+  `email`, `email_source`, `payer_name`, `is_member`, `member_match`,
+  `follow_up_status`, `followed_up_at`, `absent`, `absent_manual`,
+  `retrieved_at` (voir section 10).
+- `contact_optouts` : liste d'opposition « ne plus contacter », empreintes
+  SHA-256 uniquement (voir section 10).
 
 Voir `migrations/0001_init.sql` pour le détail et les catégories par défaut.
 
@@ -704,3 +711,100 @@ sans toucher à aucune table existante (`events`, `categories`, `meta`,
 
 Aucune nouvelle variable d'environnement n'est nécessaire : Nominatim ne
 requiert pas de clé API.
+
+---
+
+## 10. Inscrits & relances (fiche bilan d'un événement)
+
+Pour un événement lié à une billetterie HelloAsso (`helloasso_slug`), la
+section repliable **« Inscrits »** de la fiche bilan permet de rapatrier la
+liste des participants, de voir qui est adhérent de la saison en cours, et de
+relancer les non-adhérents (remerciement + proposition d'adhésion). La liste
+n'est chargée qu'à l'ouverture de la section.
+
+### Récupération (bouton « Récupérer les inscrits » / « Mettre à jour »)
+
+- À la demande uniquement, aucune synchronisation planifiée. Lit l'endpoint
+  HelloAsso `items` du formulaire avec `withDetails=true` (champs
+  personnalisés), en paginant, avec le client OAuth2 existant.
+- **Une ligne par billet** : articles de type `Registration`, états
+  `Processed` (payé) et `Registered` (saisi à la main). Les billets annulés, et
+  ceux dont tous les paiements sont remboursés, sont exclus. Les **dons** ne
+  sont pas des billets : ils sont seulement comptés (« 23 billets, 1 don non
+  compté »). C'est pourquoi le chiffre « Inscrits HelloAsso » du bilan, qui
+  compte tous les articles payés, peut dépasser d'autant le nombre de lignes.
+- Une nouvelle récupération met à jour la liste sans perdre les statuts de
+  relance (clé : identifiant de l'article HelloAsso), retire les billets
+  annulés depuis, et n'écrit que les lignes qui changent.
+- Si HelloAsso répond en erreur, rien n'est effacé.
+
+**Nom et email** : prénom/nom du participant (à défaut du payeur). Email, dans
+l'ordre : (1) réponse à une question personnalisée au libellé exact
+**« Email du participant »** (constante `PARTICIPANT_EMAIL_LABELS` dans
+`functions/_lib/attendees.js`) ; (2) email du payeur si le participant est le
+payeur ; (3) sinon email du payeur, affiché « via Prénom Nom ».
+
+**Adhérent** = au moins une adhésion non supprimée de la saison **en cours**
+(date du jour, septembre → août). Rapprochement : (1) par email, seulement si
+l'email est celui du participant, comparé aux emails des adhérents-payeurs lus
+**en direct** sur le formulaire d'adhésion (`HELLOASSO_MEMBERSHIP_FORM_SLUG`,
+non stockés ; ignoré si ce formulaire n'est pas celui de la saison en cours) ;
+(2) par prénom + nom normalisés (minuscules, sans accents, tirets/apostrophes
+→ espace), égalité stricte, dans `memberships`.
+
+**Absent** : si au moins un billet de l'événement a été scanné à l'entrée, les
+billets non scannés sont cochés « absent ». Dès que la case est modifiée à la
+main, les mises à jour ne la touchent plus.
+
+### Relance
+
+- Statuts (non-adhérents seulement) : à relancer, relancé (avec la date), ne
+  plus contacter.
+- **Copier les emails à relancer** : adresses distinctes des lignes
+  non adhérentes, non absentes, « à relancer », hors adresses d'adhérents (de
+  la liste ou du formulaire d'adhésion) et hors liste d'opposition. Proposition
+  ensuite de passer ces lignes en « relancé ».
+- **Ne plus contacter** : l'empreinte SHA-256 de l'email normalisé entre dans
+  `contact_optouts` et s'applique à toutes les lignes portant cette adresse,
+  sur tous les événements, actuels et futurs. Revenir sur ce choix retire
+  l'empreinte.
+
+### Endpoints (code d'accès exigé, réponses `Cache-Control: no-store`)
+
+| Méthode et chemin | Rôle |
+| --- | --- |
+| `POST /api/events/:id/attendees/sync` | Lit HelloAsso, met la liste à jour, renvoie liste + compteurs |
+| `GET /api/events/:id/attendees` | Liste enregistrée + compteurs |
+| `GET /api/events/:id/attendees/emails` | Emails à relancer, dédupliqués |
+| `POST /api/events/:id/attendees/mark-followed-up` | Passe en « relancé » les lignes des emails copiés |
+| `PUT /api/attendees/:id` | Statut de relance ou case absent |
+| `DELETE /api/attendees/:id` | Supprime une ligne |
+| `DELETE /api/events/:id/attendees` | Supprime toute la liste de l'événement |
+
+`DELETE /api/events/:id` supprime aussi les inscrits de l'événement.
+
+### RGPD
+
+- Finalité unique : suivre les participants et leur adresser une relance
+  associative. Données minimales : prénom, nom, email, statut. Ni téléphone, ni
+  adresse, ni montant par personne. Base D1 existante (UE).
+- **Conservation 12 mois** après la date de l'événement (à défaut, après la fin
+  de son mois) : purge automatique au début de chaque appel aux endpoints
+  ci-dessus. La liste d'opposition (empreintes seulement) est conservée.
+- Suppression ligne par ligne ou liste entière à tout moment. Une ligne
+  supprimée revient si l'on remet la liste à jour : pour ne plus contacter
+  quelqu'un, utiliser « ne plus contacter ».
+- Pas d'export global, aucune donnée personnelle dans les logs.
+- Limite connue : avec le code d'accès partagé, toute personne qui connaît le
+  code voit ces emails. À revoir lors du passage à des accès individuels
+  (Cloudflare Access).
+
+### Migration à appliquer (avant la mise en ligne du code)
+
+```
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0010_add_event_attendees.sql
+```
+
+Aucune nouvelle variable d'environnement : réutilise `HELLOASSO_CLIENT_ID`,
+`HELLOASSO_CLIENT_SECRET`, `HELLOASSO_ORG_SLUG`, `HELLOASSO_FORM_TYPE` et
+`HELLOASSO_MEMBERSHIP_FORM_SLUG`.

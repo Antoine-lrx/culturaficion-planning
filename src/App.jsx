@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 import Ganaderias from "./Ganaderias.jsx";
+import Attendees from "./Attendees.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    Culturafición · Frise de la saison
@@ -345,6 +346,40 @@ html, body{
 .cf-stat.ha .val{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:.02em;color:var(--tinta)}
 .cf-stat.ha .msg{font-size:12.5px;color:#7a6f63;font-weight:500;display:inline-flex;align-items:center;gap:5px}
 .cf-stat.ha .spin{animation:cf-spin 1s linear infinite}
+
+/* Inscrits d'un événement (fiche bilan) — composant Attendees.jsx */
+.cf-att{display:flex;flex-direction:column;gap:10px;border-top:1px solid rgba(26,20,19,.12);padding-top:12px}
+.cf-att .spin{animation:cf-spin 1s linear infinite}
+.cf-att-toggle{appearance:none;border:0;background:transparent;cursor:pointer;font-family:inherit;padding:2px 0;
+  display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#7a6f63;font-weight:700}
+.cf-att-toggle:hover{color:var(--sangre)}
+.cf-att-badge{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:.04em;color:var(--tinta)}
+.cf-att-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.cf-att-stats .cf-stat{padding:8px 10px;gap:2px}
+.cf-att-stats .cf-stat>span:first-child{font-size:9.5px;letter-spacing:.08em}
+.cf-att-stats .val{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:.02em;color:var(--tinta)}
+.cf-att-meta{font-size:12px;color:#8a7f72;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cf-att-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cf-att-copy{display:flex;flex-direction:column;gap:8px}
+.cf-att-list{display:flex;flex-direction:column;gap:6px}
+.cf-att-row{background:var(--blanco);border:1px solid rgba(26,20,19,.12);border-radius:10px;padding:8px 10px;
+  display:flex;flex-direction:column;gap:5px;min-width:0}
+.cf-att-row.absent .cf-att-name,.cf-att-row.absent .cf-att-email{opacity:.5}
+.cf-att-row[aria-busy="true"]{opacity:.6}
+.cf-att-top{display:flex;align-items:center;gap:8px;min-width:0}
+.cf-att-name{font-size:13.5px;font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cf-att-member{color:var(--oro);flex:none}
+.cf-att-nonmember{color:var(--sangre);flex:none}
+.cf-att-bottom{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0}
+.cf-att-email{font-size:12.5px;color:var(--tinta);flex:1 1 170px;min-width:0;overflow-wrap:anywhere}
+.cf-att-email.via{color:#9a8d7c;font-style:italic}
+.cf-att-status{font-family:inherit;font-size:12px;color:var(--tinta);background:var(--albero);
+  border:1px solid rgba(26,20,19,.18);border-radius:8px;padding:4px 6px;max-width:100%}
+.cf-att-absent{font-size:12px;color:#7a6f63;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.cf-att-link{appearance:none;border:0;background:transparent;cursor:pointer;font-family:inherit;font-size:12px;
+  color:#9a8d7c;text-decoration:underline;align-self:flex-start;padding:2px 0}
+.cf-att-link:hover{color:var(--sangre)}
+@media (max-width:640px){.cf-att-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .cf-detail-meta{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:13px;color:#7a6f63;margin-bottom:2px}
 
 .cf-gate{min-height:100vh;display:grid;place-items:center;padding:18px}
@@ -583,8 +618,6 @@ export default function App() {
   const [detailId, setDetailId] = useState(null);
   const [statsDraft, setStatsDraft] = useState({ registered: "", revenue: "", expenses: "" });
   const [haStats, setHaStats] = useState({ status: "idle", registered: null, revenue: null });
-  // Diagnostic TEMPORAIRE des inscrits HelloAsso (compteurs et libellés seulement).
-  const [attDiag, setAttDiag] = useState({ status: "idle", data: null, error: "" });
   const [catModal, setCatModal] = useState(false);
   const [newCat, setNewCat] = useState({ label: "", color: NEW_CAT_COLORS[0] });
   const [nameFlash, setNameFlash] = useState(false);
@@ -1260,7 +1293,6 @@ export default function App() {
 
   const openDetail = (ev) => {
     setDetailId(ev.id);
-    setAttDiag({ status: "idle", data: null, error: "" });
     setStatsDraft({
       registered: ev.registered != null ? String(ev.registered) : "",
       revenue: ev.revenue != null ? String(ev.revenue) : "",
@@ -1273,17 +1305,6 @@ export default function App() {
         .catch(() => setHaStats({ status: "error", registered: null, revenue: null }));
     } else {
       setHaStats({ status: "idle", registered: null, revenue: null });
-    }
-  };
-  // Diagnostic TEMPORAIRE (à retirer) : compteurs et libellés, aucun nom ni email.
-  const runAttDiag = async (id) => {
-    setAttDiag({ status: "loading", data: null, error: "" });
-    try {
-      const data = await api.getAttendeesDiagnostic(id);
-      setAttDiag({ status: "ok", data, error: "" });
-    } catch (e) {
-      if (e.unauthorized) { clearCode(); setAuthState("needed"); return; }
-      setAttDiag({ status: "error", data: null, error: e.message || "Diagnostic indisponible." });
     }
   };
   const saveStat = async (id, patch) => {
@@ -2885,32 +2906,13 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* DIAGNOSTIC TEMPORAIRE des inscrits HelloAsso (à retirer).
-                    Uniquement des compteurs et des libellés de champs. */}
-                {ev.helloassoSlug && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-                    <button className="cf-btn cf-btn-ghost cf-btn-sm" style={{ alignSelf: "flex-start" }}
-                      onClick={() => runAttDiag(ev.id)} disabled={attDiag.status === "loading"}>
-                      {attDiag.status === "loading" ? <><Loader2 size={14} className="spin" /> Diagnostic…</> : <>🔎 Diagnostic inscrits (temporaire)</>}
-                    </button>
-                    {attDiag.status === "error" && (
-                      <div className="cf-note warn"><AlertTriangle size={14} /> <span>{attDiag.error}</span></div>
-                    )}
-                    {attDiag.status === "ok" && attDiag.data && (
-                      <div className="cf-note" style={{ display: "block" }}>
-                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                          {attDiag.data.totalItems} billet(s) HelloAsso · {attDiag.data.retained.items} retenu(s) (Processed + Registered)
-                        </div>
-                        <div style={{ fontSize: 12, color: "#7a6f63", marginBottom: 6 }}>
-                          Copie-colle le bloc ci-dessous à Claude (il ne contient aucun nom ni aucune adresse).
-                        </div>
-                        <pre style={{ maxHeight: 320, overflow: "auto", background: "rgba(28,22,18,0.06)", padding: 10, borderRadius: 8, fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                          {JSON.stringify(attDiag.data, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Inscrits HelloAsso : section repliée, chargée à l'ouverture. */}
+                <Attendees
+                  key={ev.id}
+                  eventId={ev.id}
+                  hasSlug={!!ev.helloassoSlug}
+                  onUnauthorized={() => { clearCode(); setAuthState("needed"); }}
+                />
               </div>
               <div className="cf-modal-foot">
                 <button className="cf-btn cf-btn-ghost" onClick={() => { const cur = ev; closeDetail(); openEdit(cur); }}>

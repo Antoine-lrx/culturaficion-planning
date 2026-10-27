@@ -83,8 +83,15 @@ export const api = {
   updateMeta: (patch) => request("/api/meta", { method: "PUT", body: patch }),
 
   getHelloAsso: (formSlug) => request(`/api/helloasso/${encodeURIComponent(formSlug)}`),
-  // TEMPORAIRE : diagnostic des inscrits (compteurs et libellés seulement).
-  getAttendeesDiagnostic: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees/diagnostic`),
+
+  listAttendees: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees`),
+  syncAttendees: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees/sync`, { method: "POST" }),
+  getAttendeeEmails: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees/emails`),
+  markAttendeesFollowedUp: (eventId, emails) =>
+    request(`/api/events/${encodeURIComponent(eventId)}/attendees/mark-followed-up`, { method: "POST", body: { emails } }),
+  deleteAttendeeList: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees`, { method: "DELETE" }),
+  updateAttendee: (id, patch) => request(`/api/attendees/${encodeURIComponent(id)}`, { method: "PUT", body: patch }),
+  deleteAttendee: (id) => request(`/api/attendees/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   listMemberships: (season) => request(`/api/memberships?season=${encodeURIComponent(season)}`),
   createMembership: (m) => request("/api/memberships", { method: "POST", body: m }),

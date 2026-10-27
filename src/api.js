@@ -83,6 +83,8 @@ export const api = {
   updateMeta: (patch) => request("/api/meta", { method: "PUT", body: patch }),
 
   getHelloAsso: (formSlug) => request(`/api/helloasso/${encodeURIComponent(formSlug)}`),
+  // TEMPORAIRE : diagnostic des inscrits (compteurs et libellés seulement).
+  getAttendeesDiagnostic: (eventId) => request(`/api/events/${encodeURIComponent(eventId)}/attendees/diagnostic`),
 
   listMemberships: (season) => request(`/api/memberships?season=${encodeURIComponent(season)}`),
   createMembership: (m) => request("/api/memberships", { method: "POST", body: m }),

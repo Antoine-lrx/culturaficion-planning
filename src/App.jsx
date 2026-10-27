@@ -583,6 +583,8 @@ export default function App() {
   const [detailId, setDetailId] = useState(null);
   const [statsDraft, setStatsDraft] = useState({ registered: "", revenue: "", expenses: "" });
   const [haStats, setHaStats] = useState({ status: "idle", registered: null, revenue: null });
+  // Diagnostic TEMPORAIRE des inscrits HelloAsso (compteurs et libellés seulement).
+  const [attDiag, setAttDiag] = useState({ status: "idle", data: null, error: "" });
   const [catModal, setCatModal] = useState(false);
   const [newCat, setNewCat] = useState({ label: "", color: NEW_CAT_COLORS[0] });
   const [nameFlash, setNameFlash] = useState(false);
@@ -1258,6 +1260,7 @@ export default function App() {
 
   const openDetail = (ev) => {
     setDetailId(ev.id);
+    setAttDiag({ status: "idle", data: null, error: "" });
     setStatsDraft({
       registered: ev.registered != null ? String(ev.registered) : "",
       revenue: ev.revenue != null ? String(ev.revenue) : "",
@@ -1270,6 +1273,17 @@ export default function App() {
         .catch(() => setHaStats({ status: "error", registered: null, revenue: null }));
     } else {
       setHaStats({ status: "idle", registered: null, revenue: null });
+    }
+  };
+  // Diagnostic TEMPORAIRE (à retirer) : compteurs et libellés, aucun nom ni email.
+  const runAttDiag = async (id) => {
+    setAttDiag({ status: "loading", data: null, error: "" });
+    try {
+      const data = await api.getAttendeesDiagnostic(id);
+      setAttDiag({ status: "ok", data, error: "" });
+    } catch (e) {
+      if (e.unauthorized) { clearCode(); setAuthState("needed"); return; }
+      setAttDiag({ status: "error", data: null, error: e.message || "Diagnostic indisponible." });
     }
   };
   const saveStat = async (id, patch) => {
@@ -2870,6 +2884,33 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+
+                {/* DIAGNOSTIC TEMPORAIRE des inscrits HelloAsso (à retirer).
+                    Uniquement des compteurs et des libellés de champs. */}
+                {ev.helloassoSlug && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                    <button className="cf-btn cf-btn-ghost cf-btn-sm" style={{ alignSelf: "flex-start" }}
+                      onClick={() => runAttDiag(ev.id)} disabled={attDiag.status === "loading"}>
+                      {attDiag.status === "loading" ? <><Loader2 size={14} className="spin" /> Diagnostic…</> : <>🔎 Diagnostic inscrits (temporaire)</>}
+                    </button>
+                    {attDiag.status === "error" && (
+                      <div className="cf-note warn"><AlertTriangle size={14} /> <span>{attDiag.error}</span></div>
+                    )}
+                    {attDiag.status === "ok" && attDiag.data && (
+                      <div className="cf-note" style={{ display: "block" }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                          {attDiag.data.totalItems} billet(s) HelloAsso · {attDiag.data.retained.items} retenu(s) (Processed + Registered)
+                        </div>
+                        <div style={{ fontSize: 12, color: "#7a6f63", marginBottom: 6 }}>
+                          Copie-colle le bloc ci-dessous à Claude (il ne contient aucun nom ni aucune adresse).
+                        </div>
+                        <pre style={{ maxHeight: 320, overflow: "auto", background: "rgba(28,22,18,0.06)", padding: 10, borderRadius: 8, fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                          {JSON.stringify(attDiag.data, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="cf-modal-foot">
                 <button className="cf-btn cf-btn-ghost" onClick={() => { const cur = ev; closeDetail(); openEdit(cur); }}>

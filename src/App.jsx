@@ -9,6 +9,7 @@ import {
 import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 import Ganaderias from "./Ganaderias.jsx";
 import Attendees from "./Attendees.jsx";
+import NonMemberAttendees from "./NonMemberAttendees.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    Culturafición · Frise de la saison
@@ -99,6 +100,12 @@ function stripDiacritics(str) {
   return str.normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 const normalize = (s) => stripDiacritics(s || "").toLowerCase();
+// Date du jour en heure locale du navigateur (AAAA-MM-JJ). Jamais
+// toISOString(), qui passe en UTC et décale la date autour de minuit.
+function localTodayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
@@ -570,6 +577,7 @@ html, body{
   .cf-ganad-card .cf-card-actions{opacity:1;top:8px;right:8px}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
   .cf-memb-row{flex-wrap:wrap}
+  .cf-nm-row .cf-memb-name{flex-basis:100%}
 
   .cf-top>.cf-viewtoggle{display:none}
   .cf-burgerbtn{display:grid;place-items:center;position:absolute;top:0;right:0;
@@ -675,6 +683,7 @@ export default function App() {
   // Ganaderías : annuaire de prospection (branche Prácticos), géré par son
   // propre composant — App ne fait que déclencher son rechargement manuel.
   const [ganadRefresh, setGanadRefresh] = useState(0);
+  const [nonMembRefresh, setNonMembRefresh] = useState(0);
 
   // Le début de saison est fixé en septembre partout dans l'app (Frise et
   // Adhésions partagent la même notion de saison) : startMonth n'est plus
@@ -1548,6 +1557,17 @@ export default function App() {
       .slice(0, 8);
   }, [events, accueilQuery]);
 
+  // Accueil, barre vide : les 3 prochains événements datés (confirmés ou à
+  // confirmer), toutes saisons confondues, sans les filtres de la Frise.
+  // Calculé sur les événements déjà chargés : aucune requête serveur.
+  const upcomingEvents = useMemo(() => {
+    const today = localTodayIso();
+    return events
+      .filter((e) => (e.status === "confirme" || e.status === "a_confirmer") && e.date && e.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date) || (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0))
+      .slice(0, 3);
+  }, [events]);
+
   if (authState === "checking") {
     return (
       <div className="cf-root">
@@ -1621,7 +1641,7 @@ export default function App() {
         <button className="cf-btn cf-btn-ghost"
           onClick={() => {
             loadState();
-            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); loadWeekly(); loadMembRevenue(globalSeasonKey); }
+            if (view === "adhesions") { loadMembers(globalSeasonKey); loadMembSummary(); loadNonRenewed(); loadWeekly(); loadMembRevenue(globalSeasonKey); setNonMembRefresh((n) => n + 1); }
             if (view === "compta") loadAcctAll(globalSeasonKey);
             if (view === "ganaderias") setGanadRefresh((n) => n + 1);
           }}
@@ -1696,6 +1716,38 @@ export default function App() {
                         {ev.lieu ? ` · ${ev.lieu}` : ""}
                       </span>
                     </button>
+                  );
+                })}
+              </div>
+            )}
+            {!accueilQuery.trim() && loaded && (
+              <div className="cf-suggestions">
+                <h2 className="cf-display" style={{ margin: "10px 0 0", fontSize: 22 }}>Prochains rendez-vous</h2>
+                {upcomingEvents.length === 0 && (
+                  <span className="cf-search-count">Aucun événement daté à venir pour l'instant.</span>
+                )}
+                {upcomingEvents.map((ev) => {
+                  const t = catById[ev.type] || NEUTRAL;
+                  const st = STATUSES[ev.status] || STATUSES.idee;
+                  return (
+                    <div className="cf-search-card" key={ev.id} tabIndex={0} role="button"
+                      aria-label={"Ouvrir le bilan : " + ev.title}
+                      onClick={() => openDetail(ev)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(ev); } }}>
+                      <span className="stripe" style={{ background: t.color, opacity: st.op }} />
+                      <div className="cf-search-card-main">
+                        <div className="cf-card-title" style={{ paddingRight: 0 }}>{ev.title}</div>
+                        <div className="cf-card-meta" style={{ marginBottom: 0 }}>
+                          <span className="when"><CalendarDays size={12} /> {fmtDate(ev.date)}</span>
+                          <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
+                          {ev.lieu && <span><MapPin size={11} style={{ verticalAlign: -1 }} /> {ev.lieu}</span>}
+                        </div>
+                      </div>
+                      <span className="cf-pill" style={{ color: ev.status === "confirme" ? t.color : "#9a8d7c" }}>
+                        {ev.status === "confirme" && <Check size={10} style={{ marginRight: 3, verticalAlign: -1 }} />}
+                        {st.label}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -2165,6 +2217,16 @@ export default function App() {
               </div>
             )
           )}
+
+          {/* Venus sans adhérer : saison EN COURS (comme les non-renouvelés),
+              repliée par défaut, chargée seulement à l'ouverture. */}
+          <NonMemberAttendees
+            fallbackSeason={nonRenewed.currentSeason}
+            refreshKey={nonMembRefresh}
+            detailOpen={!!detailId}
+            onOpenEvent={(id) => { const ev = events.find((e) => e.id === id); if (ev) openDetail(ev); }}
+            onUnauthorized={() => { clearCode(); setAuthState("needed"); }}
+          />
 
           <div className="cf-rule" />
           <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>

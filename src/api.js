@@ -99,6 +99,7 @@ export const api = {
   deleteMembership: (id) => request(`/api/memberships/${id}`, { method: "DELETE" }),
   getMembershipsSummary: () => request("/api/memberships/summary"),
   getNonRenewed: () => request("/api/memberships/non-renewed"),
+  getAttendeesWithoutMembership: () => request("/api/memberships/attendees-without-membership"),
   syncMemberships: (force = false) => request("/api/memberships/sync", { method: "POST", body: { force } }),
   getMembershipsWeekly: () => request("/api/memberships/weekly"),
   getMembershipRevenue: (season) => request(`/api/memberships/revenue?season=${encodeURIComponent(season)}`),

@@ -808,3 +808,47 @@ npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0010
 Aucune nouvelle variable d'environnement : réutilise `HELLOASSO_CLIENT_ID`,
 `HELLOASSO_CLIENT_SECRET`, `HELLOASSO_ORG_SLUG`, `HELLOASSO_FORM_TYPE` et
 `HELLOASSO_MEMBERSHIP_FORM_SLUG`.
+
+---
+
+## 11. Accueil « Prochains rendez-vous » et section « Venus sans adhérer »
+
+### Accueil
+
+Barre de recherche vide : l'Accueil affiche les 3 prochains événements
+**datés** et **confirmés ou à confirmer** (date ≥ aujourd'hui, en heure locale
+du navigateur), triés par date puis par ordre de création, toutes saisons
+confondues et sans les filtres de la Frise. Calcul fait dans le navigateur à
+partir de `GET /api/state` : aucune requête supplémentaire ; « Rafraîchir » met
+le bloc à jour. Un clic ouvre la fiche/bilan.
+
+### Adhésions — « Venus sans adhérer »
+
+Section repliée sous « Perdus de vue », chargée seulement à l'ouverture. Elle
+liste, une fois chacune, les personnes venues à au moins un événement passé (ou
+du jour) de la **saison en cours** sans être adhérentes de cette saison, avec
+le nombre d'événements. Lecture seule : ni email, ni copie, ni export, ni
+relance (la relance reste dans la fiche de chaque événement).
+
+- Source : uniquement les inscrits déjà récupérés (`event_attendees`) ; aucun
+  appel HelloAsso. Événements de la saison : `date` entre le 1er septembre et
+  le 31 août, à défaut `month_key`.
+- Une personne = prénom + nom normalisés (fonction partagée
+  `normalizePersonName`, égalité stricte). Homonymes fusionnés, orthographes
+  très différentes non rapprochées : limite connue.
+- Adhérente si son nom figure dans `memberships` pour la saison en cours
+  (`is_deleted = 0`), ou si une de ses lignes a été reconnue par email pendant
+  la saison en cours. Le statut est recalculé à la lecture.
+- Exclus : lignes « absent » ; toute personne en « ne plus contacter » ou dont
+  l'email figure dans la liste d'opposition. Billets sans nom : comptés à part.
+
+| Méthode et chemin | Rôle |
+| --- | --- |
+| `GET /api/memberships/attendees-without-membership` | Compteurs, couverture et liste des non-adhérents venus (sans email) |
+
+Code d'accès exigé, `Cache-Control: no-store`, purge RGPD à 12 mois au début
+de l'appel, aucune donnée personnelle dans les logs. Lectures D1 : événements
+passés de la saison avec leurs inscrits, adhésions de la saison, liste
+d'opposition.
+
+Aucune migration, aucune nouvelle table, aucune variable d'environnement.

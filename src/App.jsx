@@ -10,6 +10,7 @@ import { api, getStoredCode, storeCode, clearCode } from "./api.js";
 import Ganaderias from "./Ganaderias.jsx";
 import Attendees from "./Attendees.jsx";
 import NonMemberAttendees from "./NonMemberAttendees.jsx";
+import { useExclusions, ExcludeButton, ExclusionModal, ExcludedBlock } from "./MembershipExclusions.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    Culturafición · Frise de la saison
@@ -19,6 +20,17 @@ import NonMemberAttendees from "./NonMemberAttendees.jsx";
    ───────────────────────────────────────────────────────────── */
 
 const ME_KEY = "culturaficion:planning:me";
+// Dernier sous-onglet ouvert de la page Adhésions (confort, jamais bloquant).
+const MEMB_TAB_KEY = "culturaficion:adhesions:tab";
+const MEMB_TABS = ["adherents", "venus", "perdus", "saison_derniere", "evolution"];
+function loadMembTab() {
+  try {
+    const v = localStorage.getItem(MEMB_TAB_KEY);
+    return MEMB_TABS.includes(v) ? v : "adherents";
+  } catch {
+    return "adherents";
+  }
+}
 
 const DEFAULT_CATS = [
   { id: "soiree",         label: "Soirée",              color: "#BB322C" },
@@ -465,6 +477,20 @@ html, body{
   background:rgba(184,134,46,.08);border:1px solid rgba(184,134,46,.35);border-left:3px solid var(--oro);
   border-radius:10px;padding:9px 12px}
 .cf-nr-lastseason{font-size:11.5px;color:#8a7550;font-weight:600;white-space:nowrap}
+/* Sous-onglets de la page Adhésions (boutons « pick ») et retraits manuels */
+.cf-memb-tabs{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 6px}
+.cf-memb-tabs .cf-pick{white-space:nowrap;flex:none}
+.cf-memb-tab-count{margin-left:5px;font-weight:700;color:var(--sangre)}
+.cf-memb-tabs .cf-pick[aria-pressed="true"]{box-shadow:inset 0 -3px 0 var(--sangre)}
+.cf-memb-tabs .cf-pick[aria-pressed="true"] .cf-memb-tab-count{color:var(--oro)}
+.cf-excl-btn{appearance:none;border:0;background:transparent;cursor:pointer;font-family:inherit;font-size:11.5px;
+  color:#9a8d7c;display:inline-flex;align-items:center;gap:4px;padding:3px 4px;border-radius:6px;flex:none;white-space:nowrap}
+.cf-excl-btn:hover{color:var(--sangre);text-decoration:underline}
+.cf-excl-block{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.cf-excl-toggle{display:flex;align-items:center;gap:5px;background:none;border:0;cursor:pointer;font:inherit;
+  font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#7a6f63;padding:0;align-self:flex-start}
+.cf-excl-toggle:hover{color:var(--sangre)}
+.cf-excl-row{opacity:.85;border-style:dashed}
 .cf-nr-empty{font-size:12.5px;color:#7a6f63;border:1px dashed rgba(26,20,19,.2);border-radius:10px;padding:12px;text-align:center}
 @media (max-width:640px){.cf-nr-grid{grid-template-columns:1fr}}
 
@@ -577,6 +603,8 @@ html, body{
   .cf-ganad-card .cf-card-actions{opacity:1;top:8px;right:8px}
   .cf-suggestion{flex-direction:column;align-items:flex-start;gap:4px}
   .cf-memb-row{flex-wrap:wrap}
+  /* Sous-onglets Adhésions : une rangée qui défile horizontalement. */
+  .cf-memb-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;min-width:0;padding-bottom:4px}
   .cf-nm-row .cf-memb-name{flex-basis:100%}
 
   .cf-top>.cf-viewtoggle{display:none}
@@ -638,9 +666,13 @@ export default function App() {
   const [membSummary, setMembSummary] = useState([]);
   const [membModal, setMembModal] = useState(null);
   // Deux listes de relance, par personne (point 4).
-  const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", previousSeason: "", toRelance: [], perdus: [] });
+  const [nonRenewed, setNonRenewed] = useState({ currentSeason: "", previousSeason: "", toRelance: [], perdus: [], perdusExcluded: [] });
   const [relanceFilter, setRelanceFilter] = useState("all"); // all | tendido | practicos
-  const [perdusOpen, setPerdusOpen] = useState(false);
+  const [perdusFilter, setPerdusFilter] = useState("all");   // all | tendido | practicos
+  // Sous-onglet affiché sur la page Adhésions + compteur « Venus sans adhérer »
+  // (connu une fois la liste chargée, null avant).
+  const [membTab, setMembTab] = useState(loadMembTab);
+  const [venusCount, setVenusCount] = useState(null);
   // Montants de cotisations de la saison affichée (source unique serveur) :
   // repris en compta (HelloAsso), hors compta (manuels), sans montant, dons.
   const [membRevenue, setMembRevenue] = useState(null);
@@ -763,11 +795,19 @@ export default function App() {
   const loadNonRenewed = useCallback(async () => {
     try {
       const data = await api.getNonRenewed();
-      setNonRenewed(data || { currentSeason: "", previousSeason: "", toRelance: [], perdus: [] });
+      setNonRenewed(data || { currentSeason: "", previousSeason: "", toRelance: [], perdus: [], perdusExcluded: [] });
     } catch {
       /* les listes de relance restent telles quelles si la requête échoue */
     }
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(MEMB_TAB_KEY, membTab); } catch { /* stockage indisponible : ignoré */ }
+  }, [membTab]);
+
+  // Retraits manuels de « Perdus de vue » : la liste est rechargée (un appel)
+  // après chaque retrait ou réintégration.
+  const perdusExcl = useExclusions("perdus_de_vue", loadNonRenewed, () => { clearCode(); setAuthState("needed"); });
 
   const loadWeekly = useCallback(async () => {
     try {
@@ -818,6 +858,7 @@ export default function App() {
       loadMembers(season || globalSeasonKey);
       loadMembSummary();
       loadNonRenewed();
+      if (res.created || res.updated || res.removed) setNonMembRefresh((n) => n + 1);
       loadWeekly();
       loadMembRevenue(season || globalSeasonKey);
     } catch (e) {
@@ -1417,6 +1458,7 @@ export default function App() {
       setMembModal(null);
       loadMembSummary();
       loadNonRenewed();
+      setNonMembRefresh((n) => n + 1);
       loadWeekly();
       loadMembRevenue(globalSeasonKey);
     } catch (e) {
@@ -1430,6 +1472,7 @@ export default function App() {
       setMembers((list) => list.filter((m) => m.id !== id));
       loadMembSummary();
       loadNonRenewed();
+      setNonMembRefresh((n) => n + 1);
       loadWeekly();
       loadMembRevenue(globalSeasonKey);
     } catch (e) {
@@ -1955,272 +1998,90 @@ export default function App() {
             )}
           </div>
 
-          {membersLoading ? (
-            <div className="cf-loading" style={{ minHeight: "auto", padding: "26px 0" }}>
-              <Loader2 size={22} className="spin" /> <span>Chargement…</span>
-            </div>
-          ) : members.length === 0 ? (
-            <div className="cf-empty" style={{ flex: "none" }}>
-              <b>Aucun adhérent pour {globalSeasonKey}</b>
-              <span>Ajoutez le premier adhérent de cette saison, ou changez de saison depuis le sélecteur en haut de page.</span>
-              <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={openAddMember}>
-                <Plus size={16} /> Premier adhérent
-              </button>
-            </div>
-          ) : (
-            <>
-              <span className="cf-search-count">
-                {members.length} adhérent{members.length > 1 ? "s" : ""} pour {globalSeasonKey}
-              </span>
-              <div className="cf-memb-list">
-                {members.map((m) => {
-                  const t = MEMBERSHIP_TYPES[m.type] || NEUTRAL;
-                  const when = fmtDate(m.joinedDate);
-                  const isHA = m.source === "helloasso";
-                  const tarifLabel = m.tarif ? TARIF_LABELS[m.tarif] : null;
-                  return (
-                    <div className="cf-memb-row" key={m.id}>
-                      <span className="cf-memb-type" style={{ background: t.color }}>
-                        {t.label}{tarifLabel ? ` · ${tarifLabel.toLowerCase()}` : ""}
-                      </span>
-                      <span className="cf-memb-name" title={`${m.firstName} ${m.lastName}`}>
-                        {m.firstName} {m.lastName}
-                        {isHA && <span className="cf-memb-hasrc" title="Importé depuis HelloAsso">HelloAsso</span>}
-                      </span>
-                      {m.amount != null && <span className="cf-memb-amount">{eur(m.amount)}</span>}
-                      <span className="cf-memb-date">{when || (m.joinedDate ? m.joinedDate : "—")}</span>
-                      <div className="cf-memb-actions">
-                        {isHA ? (
-                          <button className="cf-act" aria-label="Modifier" title="Adhésion HelloAsso : non modifiable ici" disabled style={{ opacity: 0.35, cursor: "not-allowed" }}><Pencil size={13} /></button>
-                        ) : (
-                          <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
-                        )}
-                        <button className="cf-act" aria-label="Supprimer" onClick={() => removeMember(m.id)}><Trash2 size={13} /></button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          <div className="cf-rule" />
-          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Évolution</span>
-          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Rythme des adhésions, semaine par semaine</h3>
-          <div className="cf-controls" style={{ margin: "0 0 6px" }}>
-            <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
-              <button className="cf-sf" aria-pressed={chartTypeFilter === "all"} onClick={() => setChartTypeFilter("all")}>Tous</button>
-              <button className="cf-sf" aria-pressed={chartTypeFilter === "tendido"} onClick={() => setChartTypeFilter("tendido")}>Tendido</button>
-              <button className="cf-sf" aria-pressed={chartTypeFilter === "practicos"} onClick={() => setChartTypeFilter("practicos")}>Prácticos</button>
-            </div>
-          </div>
-          {!membChart.hasData ? (
-            <div className="cf-empty" style={{ flex: "none" }}>
-              <span>Le graphique apparaîtra dès qu'une adhésion datée sera enregistrée sur l'une des saisons affichées.</span>
-            </div>
-          ) : (
-            <>
-              <div className="cf-memb-legend">
-                {membChart.series.map((s, idx) => (
-                  <span key={s.season}>
-                    <span className="cf-memb-legend-line" style={{
-                      background: s.isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c",
-                      height: s.isCurrent ? 4 : 2,
-                    }} />
-                    {s.season}
-                  </span>
+          {/* Sous-onglets de la page Adhésions : une section visible à la
+              fois (simple état React, mémorisé dans le navigateur si
+              possible). Sur mobile, la barre défile horizontalement. */}
+          {(() => {
+            const venusN = venusCount;
+            const tabs = [
+              { id: "adherents", label: "Adhérents", count: membersLoading ? null : members.length },
+              { id: "venus", label: "Venus sans adhérer", count: venusN },
+              { id: "perdus", label: "Perdus de vue", count: (nonRenewed.perdus || []).length },
+              { id: "saison_derniere", label: "Saison dernière", count: (nonRenewed.toRelance || []).length },
+              { id: "evolution", label: "Évolution", count: null },
+            ];
+            return (
+              <div className="cf-memb-tabs" role="tablist" aria-label="Sections de la page Adhésions">
+                {tabs.map((t) => (
+                  <button key={t.id} type="button" role="tab" className="cf-pick" aria-pressed={membTab === t.id}
+                    aria-selected={membTab === t.id} onClick={() => setMembTab(t.id)}>
+                    {t.label}{t.count != null ? <span className="cf-memb-tab-count">({t.count})</span> : null}
+                  </button>
                 ))}
               </div>
-              <div className="cf-memb-chart" style={{ position: "relative" }}>
-                {(() => {
-                  const WEEKS = membChart.weeks;
-                  const W = 340, H = 190, padL = 28, padR = 10, padT = 12, padB = 24;
-                  const plotW = W - padL - padR, plotH = H - padT - padB;
-                  const xAt = (i) => padL + (i * plotW) / (WEEKS - 1);
-                  const yAt = (v) => padT + plotH * (1 - v / membChart.max);
-                  const colorFor = (idx, isCurrent) => (isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c");
-                  // Étiquettes de mois placées sur la semaine où commence chaque
-                  // mois (repère saison en cours). Un trait vertical léger par mois.
-                  const cur = seasonStartYear(globalSeasonKey);
-                  const seasonStart = Date.UTC(cur, 8, 1);
-                  const MONTHS = ["SEPT", "OCT", "NOV", "DÉC", "JAN", "FÉV", "MAR", "AVR", "MAI", "JUIN", "JUIL", "AOÛT"];
-                  const monthTicks = MONTHS.map((lab, k) => {
-                    const d = Date.UTC(cur + (k >= 4 ? 1 : 0), (8 + k) % 12, 1);
-                    let wk = Math.floor((d - seasonStart) / (7 * 24 * 60 * 60 * 1000));
-                    if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
-                    return { lab, wk };
-                  });
-                  // Semaine survolée / touchée : calcul robuste via les
-                  // dimensions réelles du SVG (viewBox mis à l'échelle).
-                  const onMove = (e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
-                    const x = ((clientX - rect.left) / rect.width) * W;
-                    let wk = Math.round(((x - padL) / plotW) * (WEEKS - 1));
-                    if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
-                    setChartHoverWeek(wk);
-                  };
-                  const hw = chartHoverWeek;
-                  return (
-                    <svg viewBox={`0 0 ${W} ${H}`} className="cf-memb-svg" role="img" aria-label="Évolution hebdomadaire des adhésions"
-                      style={{ touchAction: "none" }}
-                      onMouseMove={onMove} onMouseLeave={() => setChartHoverWeek(null)}
-                      onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={() => setChartHoverWeek(null)}>
-                      {/* Repères horizontaux + valeurs 0 et max. */}
-                      <line x1={padL} y1={yAt(0)} x2={W - padR} y2={yAt(0)} className="cf-chart-axis" />
-                      <line x1={padL} y1={yAt(membChart.max)} x2={W - padR} y2={yAt(membChart.max)} className="cf-chart-grid" />
-                      <text x={padL - 5} y={yAt(0) + 3} className="cf-chart-ylab" textAnchor="end">0</text>
-                      <text x={padL - 5} y={yAt(membChart.max) + 3} className="cf-chart-ylab" textAnchor="end">{membChart.max}</text>
-                      {/* Traits + étiquettes par mois (pas d'étiquette par semaine). */}
-                      {monthTicks.map((m, i) => (
-                        <g key={i}>
-                          <line x1={xAt(m.wk)} y1={yAt(membChart.max)} x2={xAt(m.wk)} y2={yAt(0)} className="cf-chart-grid" style={{ opacity: 0.4 }} />
-                          <text x={xAt(m.wk)} y={H - 8} className="cf-chart-xlab" textAnchor="middle">{m.lab}</text>
-                        </g>
-                      ))}
-                      {/* Curseur vertical au survol / toucher. */}
-                      {hw != null && (
-                        <line x1={xAt(hw)} y1={yAt(membChart.max)} x2={xAt(hw)} y2={yAt(0)} className="cf-chart-axis" style={{ opacity: 0.55 }} />
-                      )}
-                      {/* Une courbe cumulée par saison ; la saison en cours passe en dernier (au-dessus). */}
-                      {membChart.series.map((s, idx) => (
-                        <polyline
-                          key={s.season}
-                          className="cf-chart-line"
-                          points={s.cumulative.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ")}
-                          style={{ stroke: colorFor(idx, s.isCurrent), strokeWidth: s.isCurrent ? 2.6 : 1.5, opacity: s.isCurrent ? 1 : 0.85 }}
-                        />
-                      ))}
-                      {/* Point de lecture sur chaque courbe à la semaine survolée. */}
-                      {hw != null && membChart.series.map((s, idx) => {
-                        const i = Math.min(hw, s.lastWeek);
-                        if (i < 0 || i >= s.cumulative.length) return null;
-                        return <circle key={s.season} cx={xAt(hw)} cy={yAt(s.cumulative[i])} r={s.isCurrent ? 3 : 2.2} style={{ fill: colorFor(idx, s.isCurrent) }} />;
-                      })}
-                    </svg>
-                  );
-                })()}
-                {/* Infobulle de lecture : semaine + cumul par saison affichée. */}
-                {chartHoverWeek != null && (() => {
-                  const cur = seasonStartYear(globalSeasonKey);
-                  const seasonStart = Date.UTC(cur, 8, 1);
-                  const wStart = new Date(seasonStart + chartHoverWeek * 7 * 24 * 60 * 60 * 1000);
-                  const wEnd = new Date(seasonStart + (chartHoverWeek * 7 + 6) * 24 * 60 * 60 * 1000);
-                  const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", timeZone: "UTC" });
-                  const dayMonthFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
-                  const sameMonth = wStart.getUTCMonth() === wEnd.getUTCMonth();
-                  const range = sameMonth
-                    ? `${dayFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`
-                    : `${dayMonthFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`;
-                  const left = chartHoverWeek <= (membChart.weeks - 1) / 2;
-                  return (
-                    <div className="cf-chart-tip" style={{
-                      position: "absolute", top: 6, [left ? "right" : "left"]: 8,
-                      background: "rgba(28,22,18,0.92)", color: "#f4ece0", padding: "6px 9px",
-                      borderRadius: 6, fontSize: 11, lineHeight: 1.5, pointerEvents: "none", maxWidth: 170,
-                    }}>
-                      <div style={{ fontWeight: 700, marginBottom: 2 }}>Semaine du {range}</div>
-                      {membChart.series.filter((s) => s.total > 0 || s.isCurrent).map((s) => {
-                        const i = Math.min(chartHoverWeek, s.lastWeek);
-                        const val = i >= 0 && i < s.cumulative.length ? s.cumulative[i] : 0;
-                        return <div key={s.season}>{s.season} : <b>{val}</b></div>;
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
-              {membChart.noDate > 0 && (
-                <span className="cf-hint">
-                  {membChart.noDate} adhérent{membChart.noDate > 1 ? "s" : ""} sans date d'adhésion {membChart.noDate > 1 ? "ne sont pas représentés" : "n'est pas représenté"} sur ce graphique.
-                </span>
-              )}
-              {membChart.beforeSept > 0 && (
-                <span className="cf-hint">
-                  dont {membChart.beforeSept} adhésion{membChart.beforeSept > 1 ? "s" : ""} réglée{membChart.beforeSept > 1 ? "s" : ""} avant le 1er septembre, comptée{membChart.beforeSept > 1 ? "s" : ""} en semaine 1.
-                </span>
-              )}
-            </>
-          )}
-
-          {/* Liste 1 — À relancer : adhérents de la saison dernière (présents
-              en N-1, absents en N), une ligne par personne, filtrable par type
-              pris en N-1. Dépliée par défaut : elle se vide au fil des renouv. */}
-          <div className="cf-rule" />
-          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>À relancer</span>
-          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>
-            Adhérents de la saison dernière{nonRenewed.previousSeason ? ` (${nonRenewed.previousSeason})` : ""}
-          </h3>
-          {(() => {
-            const list = (nonRenewed.toRelance || []).filter(
-              (p) => relanceFilter === "all" || (p.badges || []).some((b) => b.type === relanceFilter)
-            );
-            return (
-              <>
-                <div className="cf-controls" style={{ margin: "0 0 6px" }}>
-                  <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
-                    <button className="cf-sf" aria-pressed={relanceFilter === "all"} onClick={() => setRelanceFilter("all")}>Tous</button>
-                    <button className="cf-sf" aria-pressed={relanceFilter === "tendido"} onClick={() => setRelanceFilter("tendido")}>Tendido</button>
-                    <button className="cf-sf" aria-pressed={relanceFilter === "practicos"} onClick={() => setRelanceFilter("practicos")}>Prácticos</button>
-                  </div>
-                </div>
-                <span className="cf-search-count">
-                  {list.length} adhérent{list.length > 1 ? "s" : ""} de {nonRenewed.previousSeason || "la saison dernière"}{" "}
-                  {list.length > 1 ? "n'ont pas encore renouvelé" : "n'a pas encore renouvelé"}
-                </span>
-                {list.length === 0 ? (
-                  <div className="cf-empty" style={{ flex: "none" }}>
-                    <span>Personne à relancer pour ce filtre — tout le monde a renouvelé.</span>
-                  </div>
-                ) : (
-                  <div className="cf-memb-list">
-                    {list.map((p) => (
-                      <div className="cf-memb-row" key={`${p.first_name}-${p.last_name}`}>
-                        <span className="cf-nr-badges" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-                          {(p.badges || []).map((b) => (
-                            <span className="cf-memb-type" key={b.type} style={{ background: (MEMBERSHIP_TYPES[b.type] || NEUTRAL).color }}>
-                              {(MEMBERSHIP_TYPES[b.type] || NEUTRAL).label}{b.tarif ? ` · ${(TARIF_LABELS[b.tarif] || "").toLowerCase()}` : ""}
-                            </span>
-                          ))}
-                        </span>
-                        <span className="cf-memb-name" title={`${p.first_name} ${p.last_name}`}>{p.first_name} {p.last_name}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
             );
           })()}
 
-          {/* Liste 2 — Perdus de vue : absents en N ET N-1, présents sur une
-              saison antérieure. Repliée par défaut, triée du plus récent. */}
-          <div className="cf-rule" />
-          <button className="cf-nr-toggle" onClick={() => setPerdusOpen((o) => !o)} aria-expanded={perdusOpen}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit", padding: 0 }}>
-            {perdusOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-            <span className="cf-display" style={{ fontSize: 22 }}>Perdus de vue ({(nonRenewed.perdus || []).length})</span>
-          </button>
-          {perdusOpen && (
-            (nonRenewed.perdus || []).length === 0 ? (
-              <div className="cf-empty" style={{ flex: "none", marginTop: 8 }}>
-                <span>Personne — les anciens adhérents sont revenus depuis.</span>
+          {membTab === "adherents" && (
+            <>
+            {membersLoading ? (
+              <div className="cf-loading" style={{ minHeight: "auto", padding: "26px 0" }}>
+                <Loader2 size={22} className="spin" /> <span>Chargement…</span>
+              </div>
+            ) : members.length === 0 ? (
+              <div className="cf-empty" style={{ flex: "none" }}>
+                <b>Aucun adhérent pour {globalSeasonKey}</b>
+                <span>Ajoutez le premier adhérent de cette saison, ou changez de saison depuis le sélecteur en haut de page.</span>
+                <button className="cf-btn cf-btn-primary" style={{ alignSelf: "flex-start" }} onClick={openAddMember}>
+                  <Plus size={16} /> Premier adhérent
+                </button>
               </div>
             ) : (
-              <div className="cf-memb-list" style={{ marginTop: 8 }}>
-                {nonRenewed.perdus.map((p) => (
-                  <div className="cf-memb-row" key={`${p.first_name}-${p.last_name}`}>
-                    <span className="cf-memb-name" title={`${p.first_name} ${p.last_name}`}>{p.first_name} {p.last_name}</span>
-                    <span className="cf-nr-lastseason">
-                      Dernière adhésion : {p.last_season} · {(p.badges || []).map((b) => (MEMBERSHIP_TYPES[b.type] || NEUTRAL).label).join(", ")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )
+              <>
+                <span className="cf-search-count">
+                  {members.length} adhérent{members.length > 1 ? "s" : ""} pour {globalSeasonKey}
+                </span>
+                <div className="cf-memb-list">
+                  {members.map((m) => {
+                    const t = MEMBERSHIP_TYPES[m.type] || NEUTRAL;
+                    const when = fmtDate(m.joinedDate);
+                    const isHA = m.source === "helloasso";
+                    const tarifLabel = m.tarif ? TARIF_LABELS[m.tarif] : null;
+                    return (
+                      <div className="cf-memb-row" key={m.id}>
+                        <span className="cf-memb-type" style={{ background: t.color }}>
+                          {t.label}{tarifLabel ? ` · ${tarifLabel.toLowerCase()}` : ""}
+                        </span>
+                        <span className="cf-memb-name" title={`${m.firstName} ${m.lastName}`}>
+                          {m.firstName} {m.lastName}
+                          {isHA && <span className="cf-memb-hasrc" title="Importé depuis HelloAsso">HelloAsso</span>}
+                        </span>
+                        {m.amount != null && <span className="cf-memb-amount">{eur(m.amount)}</span>}
+                        <span className="cf-memb-date">{when || (m.joinedDate ? m.joinedDate : "—")}</span>
+                        <div className="cf-memb-actions">
+                          {isHA ? (
+                            <button className="cf-act" aria-label="Modifier" title="Adhésion HelloAsso : non modifiable ici" disabled style={{ opacity: 0.35, cursor: "not-allowed" }}><Pencil size={13} /></button>
+                          ) : (
+                            <button className="cf-act" aria-label="Modifier" onClick={() => openEditMember(m)}><Pencil size={13} /></button>
+                          )}
+                          <button className="cf-act" aria-label="Supprimer" onClick={() => removeMember(m.id)}><Trash2 size={13} /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            </>
           )}
 
-          {/* Venus sans adhérer : saison EN COURS (comme les non-renouvelés),
-              repliée par défaut, chargée seulement à l'ouverture. */}
+          {/* Venus sans adhérer : saison EN COURS. Toujours montée sur la
+              page Adhésions (un chargement à l'ouverture, pour le compteur
+              de l'onglet), affichée seulement dans son sous-onglet. */}
           <NonMemberAttendees
+            visible={membTab === "venus"}
+            onCount={setVenusCount}
             fallbackSeason={nonRenewed.currentSeason}
             refreshKey={nonMembRefresh}
             detailOpen={!!detailId}
@@ -2228,33 +2089,293 @@ export default function App() {
             onUnauthorized={() => { clearCode(); setAuthState("needed"); }}
           />
 
-          <div className="cf-rule" />
-          <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>
-          <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Évolution des effectifs, saison par saison</h3>
-          {membSummary.length === 0 ? (
-            <div className="cf-empty" style={{ flex: "none" }}>
-              <span>L'historique apparaîtra dès qu'une saison aura au moins un adhérent enregistré.</span>
-            </div>
-          ) : (
+          {membTab === "perdus" && (
             <>
-              <div className="cf-hist-legend">
-                <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.tendido.color, display: "inline-block" }} />Tendido</span>
-                <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.practicos.color, display: "inline-block" }} />Prácticos</span>
-              </div>
-              <div className="cf-hist">
-                {membSummary.map((s) => (
-                  <div className="cf-hist-col" key={s.season}>
-                    <div className="cf-hist-bars">
-                      <div className="cf-hist-bar" style={{ height: `${(s.tendido / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.tendido.color }}
-                        title={`Tendido : ${s.tendido}`} />
-                      <div className="cf-hist-bar" style={{ height: `${(s.practicos / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.practicos.color }}
-                        title={`Prácticos : ${s.practicos}`} />
+            {/* Perdus de vue : absents en N ET N-1, présents sur une saison
+                antérieure (N = saison réelle en cours, indépendante de la
+                saison naviguée). Une seule liste, ordre alphabétique (nom,
+                prénom), badge de type, filtre par type, retrait manuel. */}
+            <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Anciens adhérents</span>
+            <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Perdus de vue</h3>
+            <span className="cf-search-count">
+              Absents en {nonRenewed.currentSeason || "saison en cours"} et en {nonRenewed.previousSeason || "saison dernière"}, adhérents d'une saison antérieure
+            </span>
+            {(() => {
+              const all = nonRenewed.perdus || [];
+              const list = all.filter(
+                (p) => perdusFilter === "all" || (p.badges || []).some((b) => b.type === perdusFilter)
+              );
+              return (
+                <>
+                  <div className="cf-controls" style={{ margin: "6px 0 6px" }}>
+                    <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+                      <button className="cf-sf" aria-pressed={perdusFilter === "all"} onClick={() => setPerdusFilter("all")}>Tous</button>
+                      <button className="cf-sf" aria-pressed={perdusFilter === "tendido"} onClick={() => setPerdusFilter("tendido")}>Tendido</button>
+                      <button className="cf-sf" aria-pressed={perdusFilter === "practicos"} onClick={() => setPerdusFilter("practicos")}>Prácticos</button>
                     </div>
-                    <span className="cf-hist-label">{s.season}</span>
-                    <span className="cf-hist-values">{s.tendido} / {s.practicos}</span>
                   </div>
-                ))}
+                  <span className="cf-search-count">
+                    {list.length} personne{list.length > 1 ? "s" : ""} perdue{list.length > 1 ? "s" : ""} de vue{perdusFilter !== "all" ? " pour ce filtre" : ""}
+                  </span>
+                  {list.length === 0 ? (
+                    <div className="cf-empty" style={{ flex: "none" }}>
+                      <span>{all.length === 0 ? "Personne — les anciens adhérents sont revenus depuis." : "Personne pour ce filtre."}</span>
+                    </div>
+                  ) : (
+                    <div className="cf-memb-list">
+                      {list.map((p) => {
+                        const name = `${p.first_name} ${p.last_name}`;
+                        return (
+                          <div className="cf-memb-row" key={p.personKey}>
+                            <span className="cf-nr-badges" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                              {(p.badges || []).map((b) => (
+                                <span className="cf-memb-type" key={b.type} style={{ background: (MEMBERSHIP_TYPES[b.type] || NEUTRAL).color }}>
+                                  {(MEMBERSHIP_TYPES[b.type] || NEUTRAL).label}{b.tarif ? ` · ${(TARIF_LABELS[b.tarif] || "").toLowerCase()}` : ""}
+                                </span>
+                              ))}
+                            </span>
+                            <span className="cf-memb-name" title={name}>{name}</span>
+                            <span className="cf-nr-lastseason">Dernière adhésion : {p.last_season}</span>
+                            <ExcludeButton name={name} onClick={() => perdusExcl.askExclude(p.personKey, name)} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <ExcludedBlock
+                    items={nonRenewed.perdusExcluded || []}
+                    nameOf={(p) => `${p.first_name} ${p.last_name}`}
+                    metaOf={(p) => `dernière adhésion ${p.last_season}`}
+                    busyId={perdusExcl.busyId}
+                    onReinstate={perdusExcl.reinstate}
+                  />
+                </>
+              );
+            })()}
+            </>
+          )}
+
+          {membTab === "saison_derniere" && (
+            <>
+            {/* Liste 1 — À relancer : adhérents de la saison dernière (présents
+                en N-1, absents en N), une ligne par personne, filtrable par type
+                pris en N-1, triée par ordre alphabétique (nom, prénom). */}
+            <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>À relancer</span>
+            <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>
+              Adhérents de la saison dernière{nonRenewed.previousSeason ? ` (${nonRenewed.previousSeason})` : ""}
+            </h3>
+            {(() => {
+              const list = (nonRenewed.toRelance || []).filter(
+                (p) => relanceFilter === "all" || (p.badges || []).some((b) => b.type === relanceFilter)
+              );
+              return (
+                <>
+                  <div className="cf-controls" style={{ margin: "0 0 6px" }}>
+                    <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+                      <button className="cf-sf" aria-pressed={relanceFilter === "all"} onClick={() => setRelanceFilter("all")}>Tous</button>
+                      <button className="cf-sf" aria-pressed={relanceFilter === "tendido"} onClick={() => setRelanceFilter("tendido")}>Tendido</button>
+                      <button className="cf-sf" aria-pressed={relanceFilter === "practicos"} onClick={() => setRelanceFilter("practicos")}>Prácticos</button>
+                    </div>
+                  </div>
+                  <span className="cf-search-count">
+                    {list.length} adhérent{list.length > 1 ? "s" : ""} de {nonRenewed.previousSeason || "la saison dernière"}{" "}
+                    {list.length > 1 ? "n'ont pas encore renouvelé" : "n'a pas encore renouvelé"}
+                  </span>
+                  {list.length === 0 ? (
+                    <div className="cf-empty" style={{ flex: "none" }}>
+                      <span>Personne à relancer pour ce filtre — tout le monde a renouvelé.</span>
+                    </div>
+                  ) : (
+                    <div className="cf-memb-list">
+                      {list.map((p) => (
+                        <div className="cf-memb-row" key={`${p.first_name}-${p.last_name}`}>
+                          <span className="cf-nr-badges" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                            {(p.badges || []).map((b) => (
+                              <span className="cf-memb-type" key={b.type} style={{ background: (MEMBERSHIP_TYPES[b.type] || NEUTRAL).color }}>
+                                {(MEMBERSHIP_TYPES[b.type] || NEUTRAL).label}{b.tarif ? ` · ${(TARIF_LABELS[b.tarif] || "").toLowerCase()}` : ""}
+                              </span>
+                            ))}
+                          </span>
+                          <span className="cf-memb-name" title={`${p.first_name} ${p.last_name}`}>{p.first_name} {p.last_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
+            </>
+          )}
+
+          {membTab === "evolution" && (
+            <>
+            <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Évolution</span>
+            <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Rythme des adhésions, semaine par semaine</h3>
+            <div className="cf-controls" style={{ margin: "0 0 6px" }}>
+              <div className="cf-statfilter cf-statusfilter" style={{ marginLeft: 0 }}>
+                <button className="cf-sf" aria-pressed={chartTypeFilter === "all"} onClick={() => setChartTypeFilter("all")}>Tous</button>
+                <button className="cf-sf" aria-pressed={chartTypeFilter === "tendido"} onClick={() => setChartTypeFilter("tendido")}>Tendido</button>
+                <button className="cf-sf" aria-pressed={chartTypeFilter === "practicos"} onClick={() => setChartTypeFilter("practicos")}>Prácticos</button>
               </div>
+            </div>
+            {!membChart.hasData ? (
+              <div className="cf-empty" style={{ flex: "none" }}>
+                <span>Le graphique apparaîtra dès qu'une adhésion datée sera enregistrée sur l'une des saisons affichées.</span>
+              </div>
+            ) : (
+              <>
+                <div className="cf-memb-legend">
+                  {membChart.series.map((s, idx) => (
+                    <span key={s.season}>
+                      <span className="cf-memb-legend-line" style={{
+                        background: s.isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c",
+                        height: s.isCurrent ? 4 : 2,
+                      }} />
+                      {s.season}
+                    </span>
+                  ))}
+                </div>
+                <div className="cf-memb-chart" style={{ position: "relative" }}>
+                  {(() => {
+                    const WEEKS = membChart.weeks;
+                    const W = 340, H = 190, padL = 28, padR = 10, padT = 12, padB = 24;
+                    const plotW = W - padL - padR, plotH = H - padT - padB;
+                    const xAt = (i) => padL + (i * plotW) / (WEEKS - 1);
+                    const yAt = (v) => padT + plotH * (1 - v / membChart.max);
+                    const colorFor = (idx, isCurrent) => (isCurrent ? "#bb322c" : idx === 1 ? "#B8862E" : "#9a8d7c");
+                    // Étiquettes de mois placées sur la semaine où commence chaque
+                    // mois (repère saison en cours). Un trait vertical léger par mois.
+                    const cur = seasonStartYear(globalSeasonKey);
+                    const seasonStart = Date.UTC(cur, 8, 1);
+                    const MONTHS = ["SEPT", "OCT", "NOV", "DÉC", "JAN", "FÉV", "MAR", "AVR", "MAI", "JUIN", "JUIL", "AOÛT"];
+                    const monthTicks = MONTHS.map((lab, k) => {
+                      const d = Date.UTC(cur + (k >= 4 ? 1 : 0), (8 + k) % 12, 1);
+                      let wk = Math.floor((d - seasonStart) / (7 * 24 * 60 * 60 * 1000));
+                      if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
+                      return { lab, wk };
+                    });
+                    // Semaine survolée / touchée : calcul robuste via les
+                    // dimensions réelles du SVG (viewBox mis à l'échelle).
+                    const onMove = (e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+                      const x = ((clientX - rect.left) / rect.width) * W;
+                      let wk = Math.round(((x - padL) / plotW) * (WEEKS - 1));
+                      if (wk < 0) wk = 0; if (wk > WEEKS - 1) wk = WEEKS - 1;
+                      setChartHoverWeek(wk);
+                    };
+                    const hw = chartHoverWeek;
+                    return (
+                      <svg viewBox={`0 0 ${W} ${H}`} className="cf-memb-svg" role="img" aria-label="Évolution hebdomadaire des adhésions"
+                        style={{ touchAction: "none" }}
+                        onMouseMove={onMove} onMouseLeave={() => setChartHoverWeek(null)}
+                        onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={() => setChartHoverWeek(null)}>
+                        {/* Repères horizontaux + valeurs 0 et max. */}
+                        <line x1={padL} y1={yAt(0)} x2={W - padR} y2={yAt(0)} className="cf-chart-axis" />
+                        <line x1={padL} y1={yAt(membChart.max)} x2={W - padR} y2={yAt(membChart.max)} className="cf-chart-grid" />
+                        <text x={padL - 5} y={yAt(0) + 3} className="cf-chart-ylab" textAnchor="end">0</text>
+                        <text x={padL - 5} y={yAt(membChart.max) + 3} className="cf-chart-ylab" textAnchor="end">{membChart.max}</text>
+                        {/* Traits + étiquettes par mois (pas d'étiquette par semaine). */}
+                        {monthTicks.map((m, i) => (
+                          <g key={i}>
+                            <line x1={xAt(m.wk)} y1={yAt(membChart.max)} x2={xAt(m.wk)} y2={yAt(0)} className="cf-chart-grid" style={{ opacity: 0.4 }} />
+                            <text x={xAt(m.wk)} y={H - 8} className="cf-chart-xlab" textAnchor="middle">{m.lab}</text>
+                          </g>
+                        ))}
+                        {/* Curseur vertical au survol / toucher. */}
+                        {hw != null && (
+                          <line x1={xAt(hw)} y1={yAt(membChart.max)} x2={xAt(hw)} y2={yAt(0)} className="cf-chart-axis" style={{ opacity: 0.55 }} />
+                        )}
+                        {/* Une courbe cumulée par saison ; la saison en cours passe en dernier (au-dessus). */}
+                        {membChart.series.map((s, idx) => (
+                          <polyline
+                            key={s.season}
+                            className="cf-chart-line"
+                            points={s.cumulative.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ")}
+                            style={{ stroke: colorFor(idx, s.isCurrent), strokeWidth: s.isCurrent ? 2.6 : 1.5, opacity: s.isCurrent ? 1 : 0.85 }}
+                          />
+                        ))}
+                        {/* Point de lecture sur chaque courbe à la semaine survolée. */}
+                        {hw != null && membChart.series.map((s, idx) => {
+                          const i = Math.min(hw, s.lastWeek);
+                          if (i < 0 || i >= s.cumulative.length) return null;
+                          return <circle key={s.season} cx={xAt(hw)} cy={yAt(s.cumulative[i])} r={s.isCurrent ? 3 : 2.2} style={{ fill: colorFor(idx, s.isCurrent) }} />;
+                        })}
+                      </svg>
+                    );
+                  })()}
+                  {/* Infobulle de lecture : semaine + cumul par saison affichée. */}
+                  {chartHoverWeek != null && (() => {
+                    const cur = seasonStartYear(globalSeasonKey);
+                    const seasonStart = Date.UTC(cur, 8, 1);
+                    const wStart = new Date(seasonStart + chartHoverWeek * 7 * 24 * 60 * 60 * 1000);
+                    const wEnd = new Date(seasonStart + (chartHoverWeek * 7 + 6) * 24 * 60 * 60 * 1000);
+                    const dayFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", timeZone: "UTC" });
+                    const dayMonthFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
+                    const sameMonth = wStart.getUTCMonth() === wEnd.getUTCMonth();
+                    const range = sameMonth
+                      ? `${dayFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`
+                      : `${dayMonthFmt.format(wStart)} au ${dayMonthFmt.format(wEnd)}`;
+                    const left = chartHoverWeek <= (membChart.weeks - 1) / 2;
+                    return (
+                      <div className="cf-chart-tip" style={{
+                        position: "absolute", top: 6, [left ? "right" : "left"]: 8,
+                        background: "rgba(28,22,18,0.92)", color: "#f4ece0", padding: "6px 9px",
+                        borderRadius: 6, fontSize: 11, lineHeight: 1.5, pointerEvents: "none", maxWidth: 170,
+                      }}>
+                        <div style={{ fontWeight: 700, marginBottom: 2 }}>Semaine du {range}</div>
+                        {membChart.series.filter((s) => s.total > 0 || s.isCurrent).map((s) => {
+                          const i = Math.min(chartHoverWeek, s.lastWeek);
+                          const val = i >= 0 && i < s.cumulative.length ? s.cumulative[i] : 0;
+                          return <div key={s.season}>{s.season} : <b>{val}</b></div>;
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+                {membChart.noDate > 0 && (
+                  <span className="cf-hint">
+                    {membChart.noDate} adhérent{membChart.noDate > 1 ? "s" : ""} sans date d'adhésion {membChart.noDate > 1 ? "ne sont pas représentés" : "n'est pas représenté"} sur ce graphique.
+                  </span>
+                )}
+                {membChart.beforeSept > 0 && (
+                  <span className="cf-hint">
+                    dont {membChart.beforeSept} adhésion{membChart.beforeSept > 1 ? "s" : ""} réglée{membChart.beforeSept > 1 ? "s" : ""} avant le 1er septembre, comptée{membChart.beforeSept > 1 ? "s" : ""} en semaine 1.
+                  </span>
+                )}
+              </>
+            )}
+
+            <div className="cf-rule" />
+            <span className="cf-accueil-kicker" style={{ textAlign: "left" }}>Historique</span>
+            <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Évolution des effectifs, saison par saison</h3>
+            {membSummary.length === 0 ? (
+              <div className="cf-empty" style={{ flex: "none" }}>
+                <span>L'historique apparaîtra dès qu'une saison aura au moins un adhérent enregistré.</span>
+              </div>
+            ) : (
+              <>
+                <div className="cf-hist-legend">
+                  <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.tendido.color, display: "inline-block" }} />Tendido</span>
+                  <span><span className="dot" style={{ background: MEMBERSHIP_TYPES.practicos.color, display: "inline-block" }} />Prácticos</span>
+                </div>
+                <div className="cf-hist">
+                  {membSummary.map((s) => (
+                    <div className="cf-hist-col" key={s.season}>
+                      <div className="cf-hist-bars">
+                        <div className="cf-hist-bar" style={{ height: `${(s.tendido / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.tendido.color }}
+                          title={`Tendido : ${s.tendido}`} />
+                        <div className="cf-hist-bar" style={{ height: `${(s.practicos / membHistMax) * 100}%`, background: MEMBERSHIP_TYPES.practicos.color }}
+                          title={`Prácticos : ${s.practicos}`} />
+                      </div>
+                      <span className="cf-hist-label">{s.season}</span>
+                      <span className="cf-hist-values">{s.tendido} / {s.practicos}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             </>
           )}
         </div>
@@ -2656,6 +2777,18 @@ export default function App() {
         <Ganaderias
           refreshKey={ganadRefresh}
           onUnauthorized={() => { clearCode(); setAuthState("needed"); }}
+        />
+      )}
+
+      {/* retrait manuel d'un « perdu de vue » */}
+      {perdusExcl.target && (
+        <ExclusionModal
+          name={perdusExcl.target.name}
+          listLabel="Perdus de vue"
+          busy={perdusExcl.busy}
+          error={perdusExcl.error}
+          onCancel={perdusExcl.cancel}
+          onConfirm={perdusExcl.confirmExclude}
         />
       )}
 

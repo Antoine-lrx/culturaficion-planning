@@ -100,6 +100,10 @@ export const api = {
   getMembershipsSummary: () => request("/api/memberships/summary"),
   getNonRenewed: () => request("/api/memberships/non-renewed"),
   getAttendeesWithoutMembership: () => request("/api/memberships/attendees-without-membership"),
+  getMembershipExclusions: (list) => request(`/api/memberships/exclusions?list=${encodeURIComponent(list)}`),
+  createMembershipExclusion: (list, personKey, reason) =>
+    request("/api/memberships/exclusions", { method: "POST", body: { list, personKey, reason } }),
+  deleteMembershipExclusion: (id) => request(`/api/memberships/exclusions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   syncMemberships: (force = false) => request("/api/memberships/sync", { method: "POST", body: { force } }),
   getMembershipsWeekly: () => request("/api/memberships/weekly"),
   getMembershipRevenue: (season) => request(`/api/memberships/revenue?season=${encodeURIComponent(season)}`),

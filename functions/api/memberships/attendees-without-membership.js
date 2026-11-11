@@ -2,6 +2,9 @@ import { isAuthorized, unauthorized } from "../../_lib/auth.js";
 import { currentSeasonKey } from "../../_lib/season.js";
 import { normalizePersonName } from "../../_lib/people.js";
 import { jsonNoStore, purgeExpired, loadMemberNames, loadOptouts, emailHash } from "../../_lib/attendees.js";
+import {
+  loadActiveExclusions, splitByExclusions, deleteExclusions, personKeyHash, compareByName,
+} from "../../_lib/exclusions.js";
 
 // Date du jour à Paris (AAAA-MM-JJ) : un événement du soir compte bien comme
 // « du jour » même après minuit UTC.
@@ -25,6 +28,8 @@ const eventSortKey = (ev) => ev.date || ev.monthKey || "";
 // nom figure dans les adhésions de la saison en cours, ou si une de ses lignes
 // a été reconnue par email pendant cette saison. Exclus : lignes « absent »,
 // et toute personne en « ne plus contacter » ou dans la liste d'opposition.
+// Les personnes retirées à la main (membership_exclusions) sont renvoyées à
+// part (excluded) et ne comptent pas dans nonMembers / loyal.
 // La réponse ne contient aucun email ; rien n'est journalisé.
 export async function onRequestGet({ request, env }) {
   if (!isAuthorized(request, env)) return unauthorized();
@@ -39,7 +44,7 @@ export async function onRequestGet({ request, env }) {
 
   // Événements passés de la saison, avec leurs inscrits s'il y en a (LEFT
   // JOIN : un événement sans inscrits récupérés sert à la ligne de couverture).
-  const [rowsRes, memberNames, optouts] = await Promise.all([
+  const [rowsRes, memberNames, optouts, exclusions] = await Promise.all([
     env.DB.prepare(
       `SELECT e.id AS event_id, e.title, e.date, e.month_key, e.helloasso_slug,
               a.id AS att_id, a.first_name, a.last_name, a.email, a.is_member, a.member_match,
@@ -51,6 +56,7 @@ export async function onRequestGet({ request, env }) {
     ).bind(`${y1}-09-01`, lastDay, `${y1}-09`, lastDay.slice(0, 7)).all(),
     loadMemberNames(env),
     loadOptouts(env),
+    loadActiveExclusions(env, "venus_sans_adherer"),
   ]);
 
   const events = new Map();
@@ -114,6 +120,7 @@ export async function onRequestGet({ request, env }) {
     }
     const evs = [...p.events.values()].sort((a, b) => eventSortKey(b).localeCompare(eventSortKey(a)));
     nonMembers.push({
+      personKey: await personKeyHash(p.key),
       firstName: p.firstName,
       lastName: p.lastName,
       eventCount: evs.length,
@@ -121,13 +128,30 @@ export async function onRequestGet({ request, env }) {
       events: evs.map((e) => ({ id: e.id, title: e.title, date: e.date, monthKey: e.monthKey })),
     });
   }
-  nonMembers.sort(
-    (a, b) =>
-      b.eventCount - a.eventCount ||
-      String(b.lastEventDate || "").localeCompare(String(a.lastEventDate || "")) ||
-      a.lastName.localeCompare(b.lastName, "fr") ||
-      a.firstName.localeCompare(b.firstName, "fr")
-  );
+  // Ordre alphabétique : nom puis prénom, sans tenir compte des accents ni
+  // de la casse.
+  nonMembers.sort((a, b) => compareByName(a.lastName, a.firstName, b.lastName, b.firstName));
+
+  // Retraits manuels. Un retrait dont l'empreinte ne correspond à personne
+  // cette saison est vérifié contre tous les inscrits encore conservés (purge
+  // à 12 mois) : s'il ne correspond plus à personne, il est nettoyé. Cette
+  // lecture supplémentaire n'a lieu que dans ce cas, rare.
+  let knownKeys = null;
+  if (exclusions.length) {
+    const seen = new Set(await Promise.all([...people.keys(), ...optedOut].map(personKeyHash)));
+    if (exclusions.some((ex) => !seen.has(ex.person_key))) {
+      const all = await env.DB.prepare("SELECT first_name, last_name FROM event_attendees").all();
+      const keys = new Set();
+      for (const r of all.results) {
+        const k = normalizePersonName(r.first_name, r.last_name);
+        if (k) keys.add(k);
+      }
+      for (const h of await Promise.all([...keys].map(personKeyHash))) seen.add(h);
+      knownKeys = seen;
+    }
+  }
+  const { visible, excluded, orphanIds } = splitByExclusions(nonMembers, exclusions, knownKeys);
+  await deleteExclusions(env, orphanIds);
 
   const withHelloAsso = [...events.values()].filter((e) => e.hasHelloAsso);
   const notRetrieved = withHelloAsso
@@ -140,8 +164,9 @@ export async function onRequestGet({ request, env }) {
     counters: {
       participants: people.size,
       members,
-      nonMembers: nonMembers.length,
-      loyal: nonMembers.filter((p) => p.eventCount >= 2).length,
+      nonMembers: visible.length,
+      loyal: visible.filter((p) => p.eventCount >= 2).length,
+      excluded: excluded.length,
       rowsWithoutName,
     },
     coverage: {
@@ -149,6 +174,7 @@ export async function onRequestGet({ request, env }) {
       pastEventsRetrieved: withHelloAsso.length - notRetrieved.length,
       notRetrieved,
     },
-    people: nonMembers,
+    people: visible,
+    excluded,
   });
 }

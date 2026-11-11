@@ -824,7 +824,8 @@ le bloc à jour. Un clic ouvre la fiche/bilan.
 
 ### Adhésions — « Venus sans adhérer »
 
-Section repliée sous « Perdus de vue », chargée seulement à l'ouverture. Elle
+Sous-onglet « Venus sans adhérer » (voir §12), chargé une fois à l'ouverture de
+la page Adhésions pour afficher son compteur. Elle
 liste, une fois chacune, les personnes venues à au moins un événement passé (ou
 du jour) de la **saison en cours** sans être adhérentes de cette saison, avec
 le nombre d'événements. Lecture seule : ni email, ni copie, ni export, ni
@@ -852,3 +853,72 @@ passés de la saison avec leurs inscrits, adhésions de la saison, liste
 d'opposition.
 
 Aucune migration, aucune nouvelle table, aucune variable d'environnement.
+
+## 12. Page Adhésions : sous-onglets, tri alphabétique, retraits manuels
+
+### Sous-onglets
+
+Sous le sélecteur de saison et les totaux, une barre de sous-onglets (boutons
+« pick ») affiche **une section à la fois** : Adhérents (n) · Venus sans
+adhérer (n) · Perdus de vue (n) · Saison dernière (n) · Évolution (graphique
+hebdomadaire + historique saison par saison). Simple état React, sans routeur
+d'URL ; le dernier sous-onglet ouvert est mémorisé dans le navigateur
+(`localStorage`, clé `culturaficion:adhesions:tab`, entouré d'un try/catch).
+Sur mobile (< 640 px), la barre défile horizontalement.
+
+« Adhérents » suit la saison choisie dans le sélecteur. « Venus sans adhérer »,
+« Perdus de vue » et « Saison dernière » sont toujours calculés sur la
+**saison réelle en cours** (date du jour, septembre → août).
+
+### Rapprochement et tri
+
+- « Perdus de vue » et « Saison dernière » utilisent désormais la fonction
+  partagée `normalizePersonName` (comme « Venus sans adhérer ») : « Jean-Marc »
+  et « JEAN MARC » sont la même personne. Diagnostic sur les données réelles
+  avant correction : 3 faux positifs dans « Saison dernière », tous dus à un
+  tiret ; 0 dans « Perdus de vue » et « Venus sans adhérer ».
+- Les trois listes sont triées par nom puis prénom, sans tenir compte des
+  accents ni de la casse (`localeCompare` `fr`, `sensitivity: 'base'`).
+- « Perdus de vue » : une seule liste, badge de type (et tarif jeune/plein si
+  connu), dernière saison d'adhésion, filtre Tous / Tendido / Prácticos.
+
+### Retraits manuels (« Perdus de vue » et « Venus sans adhérer »)
+
+Bouton « Retirer de la liste » sur chaque ligne, modale avec un motif fermé
+(pas de texte libre) :
+
+| Motif | `reason` | Portée |
+| --- | --- | --- |
+| A réadhéré (autre nom / autre email) | `readhere_autrement` | Saison en cours |
+| Ne plus afficher | `ne_plus_afficher` | Permanent (`season_key` NULL) |
+| Autre | `autre` | Saison en cours |
+
+En bas de chaque liste, bloc repliable « Retirés manuellement (n) » avec
+« Réintégrer » (suppression réelle de la ligne). Les listes renvoyées par le
+serveur excluent déjà les personnes retirées ; les compteurs suivent.
+
+RGPD : `person_key` est l'**empreinte SHA-256** du prénom + nom normalisés
+(même principe que `contact_optouts`) : aucun nom en clair dans la table. Les
+noms des retirés sont retrouvés à la lecture. Un retrait dont l'empreinte ne
+correspond plus à personne (suppression, purge à 12 mois des inscrits) est
+nettoyé automatiquement ; les retraits d'une saison passée sont supprimés au
+prochain retrait.
+
+| Méthode et chemin | Rôle |
+| --- | --- |
+| `GET /api/memberships/exclusions?list=perdus_de_vue\|venus_sans_adherer` | Retraits actifs (sans nom) |
+| `POST /api/memberships/exclusions` `{ list, personKey, reason }` | Retirer une personne |
+| `DELETE /api/memberships/exclusions/:id` | Réintégrer |
+
+Code d'accès exigé (fonction `isAuthorized` existante), `Cache-Control:
+no-store`. Requêtes D1 : une lecture de plus par liste (en parallèle), aucun
+appel par ligne. Si la table n'existe pas encore, les listes fonctionnent
+normalement (aucun retrait).
+
+### Migration à appliquer
+
+```bash
+npx wrangler d1 execute culturaficion_planning --remote --file=./migrations/0011_add_membership_exclusions.sql
+```
+
+Crée uniquement la table `membership_exclusions` et son index.

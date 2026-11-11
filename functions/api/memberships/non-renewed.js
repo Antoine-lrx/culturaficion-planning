@@ -1,24 +1,21 @@
 import { json } from "../../_lib/http.js";
 import { isAuthorized, unauthorized } from "../../_lib/auth.js";
 import { currentSeasonKey } from "../../_lib/season.js";
+import { normalizePersonName } from "../../_lib/people.js";
+import {
+  loadActiveExclusions, splitByExclusions, deleteExclusions, personKeyHash, compareByName,
+} from "../../_lib/exclusions.js";
 
 const TYPE_ORDER = ["tendido", "practicos"];
 
-// Rapprochement par prénom + nom. Les noms venant de HelloAsso peuvent être
-// orthographiés différemment de ceux saisis à la main (casse, accents,
-// espaces) : on normalise donc UNIQUEMENT pour la comparaison — minuscules,
-// accents supprimés, espaces réduits, bords rognés. Les valeurs stockées et
-// affichées ne sont jamais altérées. Limite assumée et connue : deux
-// orthographes réellement différentes (« Jean-Pierre » vs « JP »), ou un
-// prénom et un nom inversés, ne sont pas rapprochés.
-function normalizeName(firstName, lastName) {
-  return `${firstName || ""} ${lastName || ""}`
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
+// Rapprochement par prénom + nom, avec la fonction partagée
+// normalizePersonName (la même que « Venus sans adhérer ») : minuscules,
+// accents supprimés, tirets et apostrophes remplacés par une espace, espaces
+// réduits, bords rognés. Uniquement pour comparer : les valeurs stockées et
+// affichées ne sont jamais altérées. « Jean-Marc » et « JEAN MARC » sont donc
+// la même personne. Limite connue : deux orthographes réellement différentes
+// (« JP » vs « Jean-Pierre ») ou un prénom et un nom inversés ne sont pas
+// rapprochés — le retrait manuel sert de filet de sécurité.
 
 // Badges (type + tarif) d'une personne pour une saison donnée, dans l'ordre
 // Tendido puis Prácticos. Le tarif n'est renseigné que s'il est connu.
@@ -33,7 +30,8 @@ function badgesFrom(typeMap) {
 // GET /api/memberships/non-renewed — deux listes distinctes, par PERSONNE
 // (tous types et toutes sources confondus), et non plus par type (point 4).
 //   toRelance : présents en N-1, absents en N (adhérents de la saison dernière).
-//   perdus    : absents en N et en N-1, mais présents sur une saison antérieure.
+//   perdus    : absents en N et en N-1, mais présents sur une saison antérieure,
+//               hors personnes retirées à la main (perdusExcluded à part).
 // N = saison en cours (date du jour, règle existante). Dès qu'une personne est
 // présente en N (au moins une ligne non supprimée), elle sort des deux listes.
 export async function onRequestGet({ request, env }) {
@@ -43,19 +41,23 @@ export async function onRequestGet({ request, env }) {
   const y1 = Number(currentSeason.split("-")[0]);
   const previousSeason = `${y1 - 1}-${y1}`;
 
-  const rows = await env.DB.prepare(
-    "SELECT first_name, last_name, type, tarif, season_key FROM memberships WHERE is_deleted = 0"
-  ).all();
+  const [rows, exclusions] = await Promise.all([
+    env.DB.prepare(
+      "SELECT first_name, last_name, type, tarif, season_key FROM memberships WHERE is_deleted = 0"
+    ).all(),
+    loadActiveExclusions(env, "perdus_de_vue"),
+  ]);
 
   // Une entrée par personne : nom affiché + saisons de présence, chaque saison
   // portant les types pris (avec le tarif si connu).
   const byPerson = new Map();
   for (const r of rows.results) {
     if (!TYPE_ORDER.includes(r.type) || !r.season_key) continue;
-    const key = normalizeName(r.first_name, r.last_name);
+    const key = normalizePersonName(r.first_name, r.last_name);
+    if (!key) continue;
     let person = byPerson.get(key);
     if (!person) {
-      person = { first_name: r.first_name, last_name: r.last_name, seasons: new Map() };
+      person = { key, first_name: r.first_name, last_name: r.last_name, seasons: new Map() };
       byPerson.set(key, person);
     }
     if (!person.seasons.has(r.season_key)) person.seasons.set(r.season_key, new Map());
@@ -87,6 +89,7 @@ export async function onRequestGet({ request, env }) {
     }
     if (!lastSeason) continue;
     perdus.push({
+      personKey: await personKeyHash(person.key),
       first_name: person.first_name,
       last_name: person.last_name,
       last_season: lastSeason,
@@ -94,11 +97,21 @@ export async function onRequestGet({ request, env }) {
     });
   }
 
-  const byName = (a, b) =>
-    a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name);
+  const byName = (a, b) => compareByName(a.last_name, a.first_name, b.last_name, b.first_name);
   toRelance.sort(byName);
-  // Perdus de vue : dernière adhésion la plus récente en premier.
-  perdus.sort((a, b) => b.last_season.localeCompare(a.last_season) || byName(a, b));
+  perdus.sort(byName);
 
-  return json({ currentSeason, previousSeason, toRelance, perdus });
+  // Retraits manuels. Orphelin = aucune personne des adhésions ne correspond
+  // plus à l'empreinte (suppression RGPD) : nettoyé, sans écriture sinon.
+  let knownKeys = null;
+  if (exclusions.length) {
+    knownKeys = new Set(await Promise.all([...byPerson.keys()].map(personKeyHash)));
+  }
+  const { visible, excluded, orphanIds } = splitByExclusions(perdus, exclusions, knownKeys);
+  await deleteExclusions(env, orphanIds);
+
+  return json(
+    { currentSeason, previousSeason, toRelance, perdus: visible, perdusExcluded: excluded },
+    { headers: { "cache-control": "no-store" } }
+  );
 }

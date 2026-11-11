@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Loader2, AlertTriangle } from "lucide-react";
 import { api } from "./api.js";
+import { useExclusions, ExcludeButton, ExclusionModal, ExcludedBlock } from "./MembershipExclusions.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    Culturafición · Venus sans adhérer (page Adhésions)
    Personnes venues aux événements passés de la saison EN COURS
    sans y être adhérentes. Outil de pilotage en lecture seule :
    ni email, ni copie, ni export, ni relance (la relance reste
-   dans la fiche de chaque événement). Repliée par défaut : rien
-   n'est chargé tant qu'elle n'est pas ouverte (quotas D1).
+   dans la fiche de chaque événement). Affichée dans le sous-onglet
+   « Venus sans adhérer » ; chargée une fois à l'ouverture de la page
+   Adhésions (un seul appel) pour alimenter le compteur de l'onglet.
+   Triée par ordre alphabétique (nom, prénom). Chaque ligne peut être
+   retirée à la main (filet de sécurité), puis réintégrée.
    ───────────────────────────────────────────────────────────── */
 
 const FILTERS = [
@@ -30,8 +34,7 @@ function fmtEventDate(value) {
 }
 const eventWhen = (ev) => fmtEventDate(ev.date || ev.monthKey);
 
-export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailOpen, onOpenEvent, onUnauthorized }) {
-  const [open, setOpen] = useState(false);
+export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailOpen, visible = true, onCount, onOpenEvent, onUnauthorized }) {
   const [state, setState] = useState({ status: "idle", data: null, error: "" });
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState(() => new Set());
@@ -39,30 +42,31 @@ export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailO
   const load = async () => {
     setState((s) => ({ status: "loading", data: s.data, error: "" }));
     try {
-      setState({ status: "ok", data: await api.getAttendeesWithoutMembership(), error: "" });
+      const data = await api.getAttendeesWithoutMembership();
+      setState({ status: "ok", data, error: "" });
+      if (onCount) onCount(data && data.counters ? data.counters.nonMembers : null);
     } catch (e) {
       if (e && e.unauthorized) { onUnauthorized(); return; }
       setState((s) => ({ status: "error", data: s.data, error: e.message || "Erreur" }));
     }
   };
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && state.status === "idle") load();
-  };
+  // Un seul chargement à l'ouverture de la page Adhésions (compteur de l'onglet).
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rechargement seulement si la section a déjà été ouverte : bouton
-  // « Rafraîchir », ou retour d'une fiche (inscrits récupérés, absent…).
+  // Rechargement : bouton « Rafraîchir », changement d'adhésions, ou retour
+  // d'une fiche (inscrits récupérés, absent…).
   const prevDetailOpen = useRef(detailOpen);
   useEffect(() => {
     const closed = prevDetailOpen.current && !detailOpen;
     prevDetailOpen.current = detailOpen;
-    if (closed && open && state.status !== "idle") load();
+    if (closed && state.status !== "idle") load();
   }, [detailOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (refreshKey && open && state.status !== "idle") load();
+    if (refreshKey && state.status !== "idle") load();
   }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const excl = useExclusions("venus_sans_adherer", load, onUnauthorized);
 
   const toggleExpanded = (key) =>
     setExpanded((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -74,18 +78,14 @@ export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailO
   const people = data ? data.people.filter((p) => filter === "all" || p.eventCount >= 2) : [];
   const rate = c && c.participants > 0 ? Math.round((c.members / c.participants) * 100) : null;
 
+  if (!visible) return null;
+
   return (
     <>
-      <div className="cf-rule" />
-      <button className="cf-nr-toggle" onClick={toggle} aria-expanded={open}
-        style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit", padding: 0, textAlign: "left" }}>
-        {open ? <ChevronDown size={18} style={{ flex: "none" }} /> : <ChevronRight size={18} style={{ flex: "none" }} />}
-        <span className="cf-display" style={{ fontSize: 22 }}>Venus sans adhérer{season ? ` — saison ${season}` : ""}</span>
-      </button>
+      <h3 className="cf-display" style={{ margin: "0 0 4px", fontSize: 22 }}>Venus sans adhérer{season ? ` — saison ${season}` : ""}</h3>
       <span className="cf-search-count">Saison en cours, calculée sur la date du jour</span>
 
-      {open && (
-        <div className="cf-att" style={{ borderTop: 0, paddingTop: 4 }}>
+      <div className="cf-att" style={{ borderTop: 0, paddingTop: 4 }}>
           {state.status === "loading" && (
             <div className="cf-att-meta"><Loader2 size={14} className="spin" /> Chargement…</div>
           )}
@@ -154,6 +154,7 @@ export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailO
                             {plural(p.eventCount, "événement", "événements")}
                           </span>
                           <span className="cf-memb-date">Dernier : {fmtEventDate(p.lastEventDate)}</span>
+                          <ExcludeButton name={name} onClick={() => excl.askExclude(p.personKey, name)} />
                         </div>
                         {isOpen && (
                           <div className="cf-suggestions" style={{ paddingLeft: 14 }}>
@@ -170,9 +171,27 @@ export default function NonMemberAttendees({ fallbackSeason, refreshKey, detailO
                   })}
                 </div>
               )}
+
+              <ExcludedBlock
+                items={data.excluded || []}
+                nameOf={(p) => `${p.firstName} ${p.lastName}`.trim()}
+                metaOf={(p) => plural(p.eventCount, "événement", "événements")}
+                busyId={excl.busyId}
+                onReinstate={excl.reinstate}
+              />
             </>
           )}
-        </div>
+      </div>
+
+      {excl.target && (
+        <ExclusionModal
+          name={excl.target.name}
+          listLabel="Venus sans adhérer"
+          busy={excl.busy}
+          error={excl.error}
+          onCancel={excl.cancel}
+          onConfirm={excl.confirmExclude}
+        />
       )}
     </>
   );

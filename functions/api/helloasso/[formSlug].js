@@ -67,7 +67,11 @@ async function fetchAggregates(env, formSlug, accessToken) {
 
     for (const item of items) {
       if (String(item.state || "").toLowerCase() === VALID_STATE) {
-        registered += 1;
+        // Seuls les billets (« Registration ») sont des inscrits : les dons
+        // faits sur la billetterie ne comptent pas comme une personne, mais
+        // restent dans les recettes (argent réellement encaissé). Même règle
+        // que la liste des inscrits (attendees/sync.js), égalité stricte.
+        if (!item.type || item.type === "Registration") registered += 1;
         revenueCents += Number(item.amount) || 0;
       }
     }

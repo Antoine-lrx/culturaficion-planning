@@ -672,6 +672,8 @@ export default function App() {
   // Sous-onglet affiché sur la page Adhésions + compteur « Venus sans adhérer »
   // (connu une fois la liste chargée, null avant).
   const [membTab, setMembTab] = useState(loadMembTab);
+  // Recherche dans l'onglet Adhérents (prénom / nom, sans accents).
+  const [memberQuery, setMemberQuery] = useState("");
   const [venusCount, setVenusCount] = useState(null);
   // Montants de cotisations de la saison affichée (source unique serveur) :
   // repris en compta (HelloAsso), hors compta (manuels), sans montant, dons.
@@ -1586,6 +1588,30 @@ export default function App() {
   const toggleStatus = (key) =>
     setStatusFilter((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
+  // Liste des adhérents affichée : triée par date d'adhésion, de la plus
+  // récente à la plus ancienne (sans date en fin de liste), puis filtrée par
+  // la recherche. Le tri est fait ici pour rester valable après un ajout ou
+  // une modification locale.
+  const visibleMembers = useMemo(() => {
+    const sorted = [...members].sort((a, b) => {
+      const da = a.joinedDate || "";
+      const db = b.joinedDate || "";
+      if (da !== db) {
+        if (!da) return 1;
+        if (!db) return -1;
+        return db.localeCompare(da);
+      }
+      return (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0);
+    });
+    const q = normalize(memberQuery.trim());
+    if (!q) return sorted;
+    return sorted.filter((m) => {
+      const full = normalize(`${m.firstName || ""} ${m.lastName || ""}`);
+      const rev = normalize(`${m.lastName || ""} ${m.firstName || ""}`);
+      return full.includes(q) || rev.includes(q);
+    });
+  }, [members, memberQuery]);
+
   const accueilSuggestions = useMemo(() => {
     const q = normalize(accueilQuery.trim());
     if (!q) return [];
@@ -2038,11 +2064,22 @@ export default function App() {
               </div>
             ) : (
               <>
+                <div className="cf-search-wrap">
+                  <Search size={16} className="cf-search-icon" />
+                  <input className="cf-search-input" type="search" value={memberQuery}
+                    onChange={(e) => setMemberQuery(e.target.value)}
+                    placeholder="Rechercher un adhérent (prénom, nom)…" aria-label="Rechercher un adhérent" />
+                </div>
                 <span className="cf-search-count">
-                  {members.length} adhérent{members.length > 1 ? "s" : ""} pour {globalSeasonKey}
+                  {memberQuery.trim()
+                    ? `${visibleMembers.length} résultat${visibleMembers.length > 1 ? "s" : ""} sur ${members.length} adhérent${members.length > 1 ? "s" : ""}`
+                    : `${members.length} adhérent${members.length > 1 ? "s" : ""} pour ${globalSeasonKey} · du plus récent au plus ancien`}
                 </span>
+                {visibleMembers.length === 0 && (
+                  <div className="cf-search-empty">Aucun adhérent ne correspond à « {memberQuery.trim()} ».</div>
+                )}
                 <div className="cf-memb-list">
-                  {members.map((m) => {
+                  {visibleMembers.map((m) => {
                     const t = MEMBERSHIP_TYPES[m.type] || NEUTRAL;
                     const when = fmtDate(m.joinedDate);
                     const isHA = m.source === "helloasso";
